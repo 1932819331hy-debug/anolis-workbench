@@ -187,8 +187,8 @@ class ParamikoSSHExecutor(Executor):
     """Executes operations on a remote machine via paramiko (programmatic SSH).
 
     Used when running inside the workbench server (Tauri sidecar) where no
-    system terminal is available. Lazy-imports paramiko so it's only required
-    when this executor is actually instantiated.
+    system terminal is available. paramiko is a core dependency; it is
+    imported here, not at module load, to keep start-up light.
 
     Known-host verification: loads system ~/.ssh/known_hosts. Unknown hosts
     are rejected (no auto-add).

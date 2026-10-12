@@ -14,12 +14,13 @@ dependencies = [
     "jsonschema>=4.22.0,<5.0.0",
     "requests>=2.32.0,<3.0.0",
     "psutil>=7.2.2,<7.3.0",
+    "paramiko>=3.4.0,<6.0.0",
 ]
 
 [project.optional-dependencies]
-ssh = [
-    "paramiko>=3.4.0,<6.0.0",
-]
+# Kept so `pip install anolis-workbench[ssh]` and `--extra ssh` still resolve;
+# paramiko is a core dependency since remote setup is offered on every install.
+ssh = []
 dev = [
     "ruff>=0.15.0,<1.0.0",
     "pytest>=8.0.0,<10.0.0",

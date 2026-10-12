@@ -13,6 +13,15 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- `paramiko` is a core dependency (#437). Onboarding offers "Set up a remote
+  device" on every install, but a plain `pip install anolis-workbench`
+  (including the Raspberry Pi bootstrap) left out the optional `ssh` extra, so
+  remote setup failed with `No module named 'paramiko'` after the user had
+  entered a target. The `ssh` extra is kept, empty, so existing
+  `anolis-workbench[ssh]` and `--extra ssh` installs still resolve.
+
 ## [0.14.0] - 2026-08-02
 
 ### Added

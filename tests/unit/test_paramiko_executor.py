@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from importlib.metadata import requires
 from unittest.mock import MagicMock, patch
 
 from anolis_workbench.core.executor import create_ssh_executor
+
+
+def test_paramiko_is_a_core_dependency() -> None:
+    # Onboarding offers remote setup on every install, so a plain
+    # `pip install anolis-workbench` must bring paramiko with it (#437).
+    reqs = requires("anolis-workbench") or []
+    assert any(r.startswith("paramiko") and "extra ==" not in r for r in reqs), reqs
 
 
 class TestParamikoSSHExecutor:
