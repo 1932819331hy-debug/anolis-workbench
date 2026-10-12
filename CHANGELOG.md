@@ -13,14 +13,77 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-12
+
+### Added
+
+- Onboarding shows the install it starts (#425, closes #228). "Set up this
+  device" and "Set up a remote device" used to navigate to a route that did
+  not exist, so the app fell back to Home and the install ran unseen. The
+  view now follows the provision job's stream in place:
+  - **Running:** each stage as it arrives.
+  - **Success:** the installed runtime version, the host preflight when it
+    needs attention, and a pending reboot.
+  - **Failure:** the error, including `install.sh`'s host preflight block with
+    each fix.
+  - **"Install anyway…":** offered, behind an inline confirm, only when the
+    preflight's sole failure is unmet requirements. It resubmits with
+    `allow_unmet_host: true`.
+  - **Other cases:** a dropped stream and a failure to start each say so.
+- Host checks in deploy and commission (#421, part of anolishq/anolis#318):
+  - **Commission preflight** runs each provider's `--check-host` after
+    `--check-config`. Unmet requirements fail the check, with the provider's
+    detail and remedy; unknown requirements become a note.
+  - **Deploy** reports `install.sh`'s host preflight block when it is what
+    failed, and a pending reboot (`/run/reboot-required` on the target) on
+    success and on failure.
+  - **Installing past unmet requirements** is an explicit opt-in:
+    `--allow-unmet-host` on `anolis-provision install` / `remote`, and
+    `allow_unmet_host: true` on `POST /api/provision/install|remote`.
+  - **The provision job's** `done` summary and `error` event carry
+    `host_preflight` and `reboot_pending`.
+
 ### Changed
 
+- Vendored contracts synced to anolis 0.1.43, bread 0.5.0 and ezo 0.4.0
+  (#420). bread's `hardware.max_bus_hz` and ezo's `sample_interval_ms` are
+  accepted, and the runtime-http contract gains `device_loss_latched`. On
+  0.14.0, importing a profile that sets `max_bus_hz` warned that it was
+  unexpected and failed save-time validation.
+- The anolis schemas were resynced so that the runtime config's `safety` and
+  `health` blocks are validated (#370). The vendored runtime-config schema had
+  been eleven releases behind. A test now fails when the three anolis locks
+  pin different tags.
+- Provider config schemas resolve by the version the machine pins (#291,
+  #283) instead of whichever envelope happens to be vendored. An inexact match
+  still validates and warns, naming both versions.
+- The provider lock file is the single declaration of provider kinds (#293,
+  #285). Adding a provider is one lock plus one envelope, and
+  `verify --all-providers` checks that they correspond.
+- Operate's stop button reads **SOFTWARE STOP**, not E-STOP, and states inline
+  that it is not the hardware emergency stop (#319). The API path stays
+  `/v0/estop`.
 - `paramiko` is a core dependency (#437). Onboarding offers "Set up a remote
   device" on every install, but a plain `pip install anolis-workbench`
   (including the Raspberry Pi bootstrap) left out the optional `ssh` extra, so
   remote setup failed with `No module named 'paramiko'` after the user had
   entered a target. The `ssh` extra is kept, empty, so existing
   `anolis-workbench[ssh]` and `--extra ssh` installs still resolve.
+
+### Removed
+
+- The workbench's own cross-provider I2C address conflict check (#421, closes
+  #417). Providers publish `anolis.claim` keys and the runtime refuses a
+  conflict at startup; claims exist only at runtime, so the authoring-time
+  check could not see them. `x-anolis-type: i2c_address` still drives the form
+  control and within-provider uniqueness.
+
+### Fixed
+
+- The frozen sidecar's PyInstaller hidden imports are derived from the package
+  tree (#299). The hand-kept list named three modules that no longer existed
+  and omitted ten that did, so a module could be left out of the desktop build
+  and fail only at runtime.
 
 ## [0.14.0] - 2026-08-02
 
