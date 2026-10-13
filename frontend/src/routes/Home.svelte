@@ -66,8 +66,9 @@
   );
 
   $effect(() => {
-    if (templates.length > 0 && !createTemplate) {
-      createTemplate = templates[0].id;
+    const usable = templates.find((t) => !t.error);
+    if (usable && !createTemplate) {
+      createTemplate = usable.id;
     }
   });
 
@@ -280,7 +281,13 @@
             <option value="">No templates available</option>
           {:else}
             {#each templates as t (t.id)}
-              <option value={t.id}>{t.meta?.name ?? t.id}</option>
+              {#if t.error}
+                <option value={t.id} disabled title={t.error}
+                  >{t.meta?.name ?? t.id} (unavailable: {t.error})</option
+                >
+              {:else}
+                <option value={t.id}>{t.meta?.name ?? t.id}</option>
+              {/if}
             {/each}
           {/if}
         </select>

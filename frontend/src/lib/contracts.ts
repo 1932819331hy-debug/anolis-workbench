@@ -25,6 +25,7 @@ export interface ProjectSummary extends UnknownRecord {
 export interface TemplateSummary extends UnknownRecord {
   id: string;
   meta: UnknownRecord;
+  error?: string;
 }
 
 export interface RuntimeStatus extends UnknownRecord {

@@ -27,6 +27,29 @@ describe('Home.svelte', () => {
     });
   });
 
+  it('shows a template that failed to load as unavailable, with its error', async () => {
+    render(Home, {
+      props: {
+        projects: [],
+        templates: [
+          { id: 'broken', meta: { name: 'broken' }, error: 'machine-profile.yaml: root must be a mapping' },
+          { id: 'sim-quickstart', meta: { name: 'Sim Quickstart' } },
+        ],
+        onNavigate: vi.fn(),
+        onProjectsRefreshed: vi.fn(async () => {}),
+      },
+    });
+
+    const option = screen.getByRole('option', { name: /broken/ }) as HTMLOptionElement;
+    expect(option.disabled).toBe(true);
+    expect(option).toHaveTextContent('root must be a mapping');
+
+    const templateSelect = screen.getByLabelText('Template') as HTMLSelectElement;
+    await waitFor(() => {
+      expect(templateSelect.value).toBe('sim-quickstart');
+    });
+  });
+
   it('shows validation error and does not call API for invalid project name', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

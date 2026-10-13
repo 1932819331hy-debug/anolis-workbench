@@ -206,11 +206,14 @@ def serve_templates(handler) -> None:
         return
     result = []
     for directory in sorted(tpl_root.iterdir()):
-        if not directory.is_dir() or not (directory / machine_profile.PROFILE_FILENAME).is_file():
+        if not directory.is_dir():
             continue
         try:
             profile = machine_profile.load_profile(directory)
-        except machine_profile.ProfileError:
+        except machine_profile.ProfileError as exc:
+            # Listed with its error rather than dropped, so a broken template
+            # is visible instead of silently missing (#356).
+            result.append({"id": directory.name, "meta": {"name": directory.name}, "error": str(exc)})
             continue
         result.append(
             {

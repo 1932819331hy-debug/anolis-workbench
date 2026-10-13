@@ -815,6 +815,11 @@ components:
           type: object
           description: Template metadata
           additionalProperties: true
+        error:
+          type: string
+          description: >-
+            Present when the template's machine profile failed to load; the
+            template is listed but cannot be used to create a project.
       additionalProperties: true
 
     StatusResponse:

@@ -134,3 +134,53 @@ def test_real_world_provider_configs_satisfy_the_vendored_envelopes(fixture: str
     envelope = provider_schemas.get_envelope(kind)
     assert envelope is not None, f"no vendored envelope for {kind}"
     jsonschema.Draft202012Validator(envelope["schema"]).validate(_load_yaml(FIXTURE_DIR / fixture))
+
+
+class _CapturingHandler:
+    def __init__(self) -> None:
+        self.responses: list[tuple[int, object]] = []
+
+    def _json(self, status: int, data: object) -> None:
+        self.responses.append((status, data))
+
+
+def _served_templates() -> list[dict]:
+    from anolis_workbench.server.routes import compose
+
+    handler = _CapturingHandler()
+    compose.serve_templates(handler)
+    [(status, data)] = handler.responses
+    assert status == 200
+    assert isinstance(data, list)
+    return data
+
+
+def test_served_templates_are_exactly_the_shipped_directories() -> None:
+    """A template that fails to load must fail the build, not quietly drop out
+    of GET /api/templates (#356)."""
+    served = _served_templates()
+    shipped = sorted(d.name for d in TEMPLATES_DIR.iterdir() if d.is_dir())
+    assert [t["id"] for t in served] == shipped
+    broken = {t["id"]: t["error"] for t in served if "error" in t}
+    assert broken == {}, f"templates that fail to load: {broken}"
+
+
+def test_a_broken_template_is_listed_with_its_error(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from anolis_workbench.core import paths as paths_module
+
+    good = tmp_path / "good"
+    good.mkdir()
+    (good / machine_profile.PROFILE_FILENAME).write_text("display_name: Good\n", encoding="utf-8")
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    (bad / machine_profile.PROFILE_FILENAME).write_text("- not a mapping\n", encoding="utf-8")
+    (tmp_path / "no-profile").mkdir()
+    monkeypatch.setattr(paths_module, "TEMPLATES_ROOT", tmp_path)
+
+    served = {t["id"]: t for t in _served_templates()}
+
+    assert sorted(served) == ["bad", "good", "no-profile"]
+    assert "error" not in served["good"]
+    assert served["good"]["meta"] == {"name": "Good"}
+    assert "root must be a mapping" in served["bad"]["error"]
+    assert f"No {machine_profile.PROFILE_FILENAME}" in served["no-profile"]["error"]
