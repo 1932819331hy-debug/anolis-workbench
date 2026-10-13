@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import threading
 import time
@@ -79,8 +78,6 @@ def resolve_config(
 
 
 FRONTEND_DIR = paths_module.FRONTEND_DIR
-
-_WORKSPACE_ROUTE_RE = re.compile(r"^/projects/[^/]+(?:/(?:compose|commission|operate))?/?$")
 
 _MIME = {
     ".html": "text/html; charset=utf-8",
@@ -238,18 +235,21 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _serve_static(self, path: str) -> None:
         decoded = urllib.parse.unquote(path)
-        if decoded == "/" or _WORKSPACE_ROUTE_RE.match(decoded):
-            self._serve_index()
-            return
-
         rel = decoded.lstrip("/")
         if ".." in rel:
             self._json(400, {"error": "Bad request"})
             return
 
         file_path = FRONTEND_DIR / rel
-        if not file_path.is_file():
-            self._json(404, {"error": "Not found"})
+        if not rel or not file_path.is_file():
+            # Any other GET that is not an API call or a file name is a client
+            # route: the SPA owns routing and sends a path it does not know
+            # back to "/", so the server needs no copy of the route table.
+            # Project names cannot contain a dot (projects.NAME_RE).
+            if not decoded.startswith("/api/") and "." not in decoded.rsplit("/", 1)[-1]:
+                self._serve_index()
+            else:
+                self._json(404, {"error": "Not found"})
             return
 
         content_type = _MIME.get(file_path.suffix.lower(), "application/octet-stream")

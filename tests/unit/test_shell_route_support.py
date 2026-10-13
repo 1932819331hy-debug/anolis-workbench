@@ -178,6 +178,10 @@ def test_shell_routes_resolve_to_workbench_index(workbench_server: dict[str, Any
     try:
         for path in (
             "/",
+            # A reload, bookmark or shared link of /fleet returned a JSON 404 (#347).
+            "/fleet",
+            # A path the client does not know: the SPA sends it back to "/".
+            "/nowhere",
             "/projects/wb-route-test",
             "/projects/wb-route-test/compose",
             "/projects/wb-route-test/commission",
@@ -211,10 +215,13 @@ def test_status_and_static_assets_are_served(workbench_server: dict[str, Any]) -
 
 
 def test_unknown_static_path_returns_not_found(workbench_server: dict[str, Any]) -> None:
+    # The SPA fallback must not answer for a missing file or an unknown API
+    # route: a client fetching either has to see the 404, not index.html.
     base_url = workbench_server["base_url"]
-    status_code, payload = _http_json(base_url, "/missing.asset")
-    assert status_code == 404
-    assert payload.get("error") == "Not found"
+    for path in ("/missing.asset", "/assets/missing.js", "/api/nonexistent"):
+        status_code, payload = _http_json(base_url, path)
+        assert status_code == 404, path
+        assert payload.get("error") == "Not found", path
 
 
 def test_invalid_project_name_is_rejected(workbench_server: dict[str, Any]) -> None:
