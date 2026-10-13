@@ -370,7 +370,11 @@
       }}
     />
   {:else if workspace === "commission"}
-    <Commission {projectName} {system} {runtimeStatus} {commissionRunningForCurrent} />
+    <!-- Remount per project: a preflight result, or one still in flight,
+         belongs to the project it ran for and must not gate another's Launch. -->
+    {#key projectName}
+      <Commission {projectName} {system} {runtimeStatus} {commissionRunningForCurrent} />
+    {/key}
   {:else if workspace === "operate"}
     <Operate {projectName} {runtimeStatus} />
   {/if}
