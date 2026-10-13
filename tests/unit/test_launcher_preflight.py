@@ -180,3 +180,50 @@ def test_preflight_fails_when_host_requirements_cannot_be_evaluated(project) -> 
     check = _check(result, "Provider sim0 --check-host")
     assert check["ok"] is False
     assert "cannot read config" in (check["error"] or "")
+
+
+def test_preflight_counts_a_skipped_check_as_skipped_not_passed(project) -> None:
+    """#338: ok means "nothing failed" and gates Launch, but a skipped check
+    verified nothing, so the result must never report it as a pass."""
+    # --check-config predates the binary (skipped); --check-host is met.
+    pdir, document = project(
+        'case "$1" in --check-config) echo "unknown option: --check-config" >&2; exit 1;; '
+        f"--check-host) echo '{_MET_ENVELOPE}'; exit 0;; *) exit 64;; esac"
+    )
+
+    result = launcher.preflight("smoke", document, pdir)
+
+    passed = sum(1 for c in result["checks"] if c["ok"] is True)
+    assert result["summary"] == {"passed": passed, "skipped": 1, "failed": 0}
+    assert passed == len(result["checks"]) - 1
+
+
+def test_preflight_summary_counts_failures(project) -> None:
+    # --check-config rejects the config; --check-host is met.
+    pdir, document = project(
+        'case "$1" in --check-config) echo "config invalid: bad tick" >&2; exit 1;; '
+        f"--check-host) echo '{_MET_ENVELOPE}'; exit 0;; *) exit 64;; esac"
+    )
+
+    result = launcher.preflight("smoke", document, pdir)
+
+    assert result["summary"]["failed"] == 1
+    assert result["summary"]["skipped"] == 0
+    assert sum(result["summary"].values()) == len(result["checks"])
+
+
+def test_preflight_carries_a_summary_when_the_launch_projection_fails(project, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The early return when the config cannot be projected is still a
+    preflight result; the UI reads summary unconditionally."""
+    pdir, document = project("exit 0")
+
+    def _boom(*_args: object, **_kwargs: object) -> pathlib.Path:
+        raise RuntimeError("cannot project")
+
+    monkeypatch.setattr(launcher, "materialize_launch_config", _boom)
+
+    result = launcher.preflight("smoke", document, pdir)
+
+    assert result["ok"] is False
+    assert result["summary"] == {"passed": 0, "skipped": 0, "failed": 1}
+    assert result["checks"][0]["error"] == "cannot project"

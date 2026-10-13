@@ -487,11 +487,16 @@
           {launchRunning ? "Launching…" : "Launch →"}
         </button>
         {#if preflightResults !== null}
+          {@const s = preflightResults.summary}
           <span
             class="launch-summary"
-            style="color: {preflightResults.ok ? 'var(--state-nominal)' : 'var(--state-fault)'}"
+            style="color: {s.failed > 0
+              ? 'var(--state-fault)'
+              : s.skipped > 0
+                ? 'var(--state-warning)'
+                : 'var(--state-nominal)'}"
           >
-            {preflightResults.ok ? "✓ All checks passed" : "✗ Checks failed"}
+            {`${s.passed} passed · ${s.skipped} skipped · ${s.failed} failed`}
           </span>
         {/if}
       </div>

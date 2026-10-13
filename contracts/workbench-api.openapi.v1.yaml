@@ -902,10 +902,11 @@ components:
 
     PreflightResponse:
       type: object
-      required: [ok, checks]
+      required: [ok, checks, summary]
       description: >-
         Preflight check results. ok is true only when all checks have ok !=
-        false. A skipped check (ok: null) does not make the top-level ok false.
+        false. A skipped check (ok: null) does not make the top-level ok false,
+        and is counted in summary.skipped, never in summary.passed.
       properties:
         ok:
           type: boolean
@@ -914,4 +915,19 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PreflightCheckItem"
+        summary:
+          type: object
+          required: [passed, skipped, failed]
+          description: Check counts by state; they sum to the length of checks.
+          properties:
+            passed:
+              type: integer
+              minimum: 0
+            skipped:
+              type: integer
+              minimum: 0
+            failed:
+              type: integer
+              minimum: 0
+          additionalProperties: false
       additionalProperties: true

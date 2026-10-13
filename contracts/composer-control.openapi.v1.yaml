@@ -231,7 +231,7 @@ components:
       additionalProperties: true
     PreflightResponse:
       type: object
-      required: [ok, checks]
+      required: [ok, checks, summary]
       properties:
         ok:
           type: boolean
@@ -239,4 +239,14 @@ components:
           type: array
           items:
             type: object
+        summary:
+          type: object
+          required: [passed, skipped, failed]
+          properties:
+            passed:
+              type: integer
+            skipped:
+              type: integer
+            failed:
+              type: integer
       additionalProperties: true

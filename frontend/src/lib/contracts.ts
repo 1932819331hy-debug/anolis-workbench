@@ -56,6 +56,7 @@ export interface PreflightCheck extends UnknownRecord {
 export interface PreflightResult extends UnknownRecord {
   ok: boolean;
   checks: PreflightCheck[];
+  summary: { passed: number; skipped: number; failed: number };
 }
 
 export interface ProviderSchemaEnvelope extends UnknownRecord {

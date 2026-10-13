@@ -296,7 +296,8 @@ def _current_runtime_snapshot(clean_stale: bool = False) -> dict:
 
 def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
     """
-    Run preflight checks and return {"ok": bool, "checks": [...]}.
+    Run preflight checks and return {"ok": bool, "checks": [...], "summary": {...}}
+    (see _preflight_result).
     Re-renders YAML to disk before running binary checks.
     """
     from anolis_workbench.core import (
@@ -318,7 +319,7 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
                 "hint": None,
             }
         )
-        return {"ok": False, "checks": checks}
+        return _preflight_result(checks)
 
     # Check 1: Runtime binary
     host_paths = canonical.host_paths({"host_paths": system.get("host_paths")})
@@ -394,8 +395,19 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
         # v1 §6); the workbench relays it and knows no transport itself.
         checks.append(_check_host_binary(f"Provider {pid} --check-host", exe, yaml_path))
 
-    ok = all(c.get("ok") is not False for c in checks)
-    return {"ok": ok, "checks": checks}
+    return _preflight_result(checks)
+
+
+def _preflight_result(checks: list[dict]) -> dict:
+    """`ok` gates Launch and means "nothing failed". A skipped check (ok None)
+    verified nothing, so `summary` counts it apart from the passes."""
+    failed = sum(1 for c in checks if c.get("ok") is False)
+    passed = sum(1 for c in checks if c.get("ok") is True)
+    return {
+        "ok": failed == 0,
+        "checks": checks,
+        "summary": {"passed": passed, "skipped": len(checks) - passed - failed, "failed": failed},
+    }
 
 
 # ---------------------------------------------------------------------------
