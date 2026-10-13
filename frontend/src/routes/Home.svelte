@@ -1,15 +1,23 @@
 <script lang="ts">
+  import ConfirmModal from "../lib/ConfirmModal.svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
-  import type { ApiErrorResponse, ProjectSummary, TemplateSummary } from "../lib/contracts";
+  import type {
+    ApiErrorResponse,
+    ProjectSummary,
+    RuntimeStatus,
+    TemplateSummary,
+  } from "../lib/contracts";
 
   let {
     projects,
     templates,
+    runtimeStatus = null,
     onNavigate,
     onProjectsRefreshed,
   }: {
     projects: ProjectSummary[];
     templates: TemplateSummary[];
+    runtimeStatus?: RuntimeStatus | null;
     onNavigate: (path: string) => void;
     onProjectsRefreshed: () => Promise<void> | void;
   } = $props();
@@ -43,6 +51,19 @@
   let rollbackRunning = $state<boolean>(false);
   let rollbackFeedback = $state<string>("");
   let rollbackIsError = $state<boolean>(false);
+  let rollbackConfirmOpen = $state<boolean>(false);
+  // install.sh --rollback reports nothing about what <prefix>/.prev holds, so
+  // the target version cannot be named here (#338). /api/status does not say
+  // whether a running runtime is the installed service or a dev launch, so
+  // the message names the project without claiming where it came from.
+  const rollbackMessage = $derived(
+    "Rollback restores the runtime and provider binaries from the previous install " +
+      "and restarts the installed runtime service. Anything that service is driving " +
+      "stops while it restarts. The version it rolls back to is not reported." +
+      (runtimeStatus?.running && runtimeStatus.active_project
+        ? ` A runtime is running project "${runtimeStatus.active_project}" on this machine.`
+        : ""),
+  );
 
   $effect(() => {
     if (templates.length > 0 && !createTemplate) {
@@ -349,7 +370,7 @@
           type="button"
           class="btn-secondary btn-sm"
           disabled={rollbackRunning}
-          onclick={doRollback}
+          onclick={() => (rollbackConfirmOpen = true)}
         >
           {rollbackRunning ? "Rolling back…" : "Rollback"}
         </button>
@@ -378,3 +399,15 @@
     </div>
   </div>
 </section>
+
+<ConfirmModal
+  open={rollbackConfirmOpen}
+  title="Roll back installed binaries?"
+  message={rollbackMessage}
+  confirmLabel="Roll back and restart"
+  onConfirm={() => {
+    rollbackConfirmOpen = false;
+    void doRollback();
+  }}
+  onCancel={() => (rollbackConfirmOpen = false)}
+/>

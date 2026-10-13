@@ -352,6 +352,7 @@
     <Home
       {projects}
       {templates}
+      {runtimeStatus}
       onNavigate={(path) => void navigateTo(path, { bypassGuards: true })}
       {onProjectsRefreshed}
     />

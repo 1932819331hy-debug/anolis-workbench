@@ -76,4 +76,40 @@ describe('Home.svelte', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('asks before rolling back, says the service restarts, and names a running project', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { success: true, output: '', error: null }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(Home, {
+      props: {
+        projects: [],
+        templates: [],
+        runtimeStatus: { running: true, active_project: 'demo' },
+        onNavigate: vi.fn(),
+        onProjectsRefreshed: vi.fn(async () => {}),
+      },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Rollback' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent(/restart/i);
+    expect(dialog).toHaveTextContent('A runtime is running project "demo" on this machine.');
+    // /api/status cannot tell a dev launch from the installed service.
+    expect(dialog).not.toHaveTextContent(/launched from this workbench/);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Rollback' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Roll back and restart' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe('/api/rollback');
+  });
 });
