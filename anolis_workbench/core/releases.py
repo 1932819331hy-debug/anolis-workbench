@@ -19,6 +19,10 @@ import requests
 GITHUB_API = "https://api.github.com"
 RUNTIME_REPO = "anolishq/anolis"
 
+# The architectures release assets are published for, in every spelling the
+# workbench accepts: aarch64 is the kernel's name for arm64.
+SUPPORTED_ARCHS = ("arm64", "aarch64", "x86_64")
+
 
 def _seed_from_env() -> "dict[str, str | None]":
     raw = os.environ.get("ANOLIS_WB_RELEASE_PINS")

@@ -96,7 +96,8 @@ describe("Commission.svelte (imported project)", () => {
     // No variant picker: install.sh's bundle assembly always stages `manual`
     // and ignores --variant, so a picker here would claim a choice the bundle
     // does not carry. The variants ARE all in the bundle; the target chooses.
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    // The only picker is the bundle's target architecture (#338).
+    expect(screen.getAllByRole("combobox").map((el) => el.id)).toEqual(["bundle-arch"]);
     expect(screen.getByText(/Carries every runtime variant/)).toHaveTextContent("automation");
     expect(screen.getByText(/install\.sh --variant/)).toBeInTheDocument();
   });

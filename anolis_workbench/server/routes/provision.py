@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from anolis_workbench.core import deploy, installer
+from anolis_workbench.core import deploy, installer, releases
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core.executor import ParamikoSSHExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
@@ -325,6 +325,14 @@ def start_bundle(handler: Any) -> None:
     content_length = int(handler.headers.get("Content-Length", 0))
     body = handler.rfile.read(content_length) if content_length else b"{}"
     params = json.loads(body)
+
+    # Passed to install.sh --stage --arch verbatim, so it is checked against
+    # the arches the CLI accepts too. Absent means "the host's arch".
+    arch = params.get("arch")
+    if arch is not None and arch not in releases.SUPPORTED_ARCHS:
+        expected = ", ".join(releases.SUPPORTED_ARCHS)
+        handler._json(400, {"error": f"Unsupported arch {arch!r}; expected one of {expected}"})
+        return
 
     job = _create_job()
     thread = threading.Thread(target=_run_bundle_job, args=(job, params), daemon=True)

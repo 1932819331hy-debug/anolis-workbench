@@ -86,6 +86,43 @@ describe('Commission.svelte', () => {
     expect(screen.getByRole('button', { name: /Launch/ })).toBeEnabled();
   });
 
+  it('builds the bundle for the architecture the user chose', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, { job_id: 'job-1' }));
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal(
+      'EventSource',
+      class {
+        onmessage: ((ev: MessageEvent) => void) | null = null;
+        close(): void {}
+      },
+    );
+
+    render(Commission, {
+      props: {
+        projectName: 'demo',
+        system: createProjectDocument('demo'),
+        runtimeStatus: createRuntimeStatus(),
+        commissionRunningForCurrent: false,
+      },
+    });
+
+    const arch = screen.getByLabelText('Target architecture') as HTMLSelectElement;
+    expect(arch.value).toBe('arm64');
+    expect(screen.getByRole('option', { name: 'Raspberry Pi (arm64)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'x86_64' })).toBeInTheDocument();
+
+    await fireEvent.change(arch, { target: { value: 'x86_64' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Export Bundle' }));
+
+    await waitFor(() => {
+      const call = (fetchMock.mock.calls as unknown as Array<[RequestInfo | URL, RequestInit]>).find(
+        ([input]) => pathFromInput(input) === '/api/provision/bundle',
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ project: 'demo', arch: 'x86_64' });
+    });
+  });
+
   it('shows launch in-flight state while launch request is pending', async () => {
     const launchResponse = deferred<Response>();
     const fetchMock = vi.fn((input: RequestInfo | URL) => {

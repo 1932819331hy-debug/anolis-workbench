@@ -48,6 +48,37 @@ class TestStartInstall:
         assert "job_id" in data
 
 
+class TestStartBundle:
+    """The arch reaches install.sh --stage --arch verbatim, so it is checked
+    against the same allowlist as the provision CLI (#338)."""
+
+    @patch("anolis_workbench.server.routes.provision._run_bundle_job")
+    @patch("anolis_workbench.server.routes.provision._create_job")
+    def test_rejects_an_unknown_arch_without_starting_a_job(self, create_job: MagicMock, _run: MagicMock) -> None:
+        handler = FakeHandler({"project": "demo", "arch": "riscv64"})
+
+        provision.start_bundle(handler)
+
+        status, data = handler._responses[0]
+        assert status == 400
+        assert "riscv64" in data["error"]
+        create_job.assert_not_called()
+
+    @patch("anolis_workbench.server.routes.provision._run_bundle_job")
+    @patch("anolis_workbench.server.routes.provision._create_job")
+    def test_accepts_the_allowlisted_archs_and_no_arch(self, create_job: MagicMock, _run: MagicMock) -> None:
+        create_job.return_value = MagicMock(job_id="job-1")
+        # No arch: the job falls back to the host's arch, as before.
+        for body in ({"arch": "arm64"}, {"arch": "aarch64"}, {"arch": "x86_64"}, {}):
+            handler = FakeHandler({"project": "demo", **body})
+
+            provision.start_bundle(handler)
+
+            status, data = handler._responses[0]
+            assert status == 202, (body, data)
+        assert create_job.call_count == 4
+
+
 class TestStartRemote:
     def test_returns_400_without_target(self) -> None:
         handler = FakeHandler({"project": "bioreactor-v1"})

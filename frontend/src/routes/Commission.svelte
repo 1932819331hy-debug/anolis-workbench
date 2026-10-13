@@ -84,6 +84,9 @@
   let bundleRunning = $state<boolean>(false);
   let bundleFeedback = $state<string>("");
   let bundleIsError = $state<boolean>(false);
+  // The two architectures release assets exist for. The default is the Pi
+  // target, labelled as such, with the alternative always visible (#338).
+  let bundleArch = $state<"arm64" | "x86_64">("arm64");
 
   let commissionLiveDataActive = false;
 
@@ -392,7 +395,7 @@
       const startRes = await fetchJson<{ job_id: string }>("/api/provision/bundle", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: projectName, arch: "arm64" }),
+        body: JSON.stringify({ project: projectName, arch: bundleArch }),
       });
       const jobId = startRes.job_id;
       bundleFeedback = "Building bundle…";
@@ -658,6 +661,16 @@
 
   <!-- Export bundle (offline install package) -->
   <div class="commission-export">
+    <label for="bundle-arch">Target architecture</label>
+    <select
+      id="bundle-arch"
+      value={bundleArch}
+      disabled={bundleRunning}
+      onchange={(e) => (bundleArch = e.currentTarget.value as "arm64" | "x86_64")}
+    >
+      <option value="arm64">Raspberry Pi (arm64)</option>
+      <option value="x86_64">x86_64</option>
+    </select>
     <button
       type="button"
       class="btn-secondary"

@@ -114,7 +114,7 @@ def _parse_args() -> argparse.Namespace:
     bundle_parser.add_argument(
         "--arch",
         required=True,
-        choices=["arm64", "aarch64", "x86_64"],
+        choices=releases.SUPPORTED_ARCHS,
         help="Target architecture (required — no auto-detect in bundle mode).",
     )
     bundle_parser.add_argument(
@@ -641,7 +641,7 @@ def _run_remote(args: argparse.Namespace) -> int:
     remote_arch = arch_result.stdout.strip()
     _print_progress("platform", f"Remote architecture: {remote_arch}")
 
-    if remote_arch not in ("aarch64", "arm64", "x86_64"):
+    if remote_arch not in releases.SUPPORTED_ARCHS:
         print(f"\nERROR: Unsupported remote architecture: {remote_arch}", file=sys.stderr)
         return 1
 
