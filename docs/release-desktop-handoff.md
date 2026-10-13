@@ -14,32 +14,50 @@ The desktop wrapper is a shell only: frontend still talks directly to
 
 ## Required Inputs
 
-1. Version in `pyproject.toml` (must match workflow input).
-2. Built frontend assets at `anolis_workbench/frontend/dist/`.
-3. Rust + Node toolchains available in CI runners.
+1. The release version, bumped in every file listed in `version-locations.txt`.
+2. Rust + Node toolchains available in CI runners.
+
+The workflow builds the frontend itself (`npm ci && npm run build` in
+`frontend/`) in every freeze and bundle job, so no prebuilt assets are needed.
 
 Version alignment rule:
 
-- `desktop-release.yml` validates that the requested version exactly matches all of:
+- The `validate` job's "Validate version alignment across all manifests" step
+  in `release.yml` fails unless the requested version is valid semver, its tag
+  (`v<version>`) does not exist yet, and the version exactly matches all of:
   - `pyproject.toml` (`project.version`)
   - `desktop/package.json` (`version`)
-  - `desktop/src-tauri/Cargo.toml` (`package.version`)
+  - `frontend/package.json` (`version`)
   - `desktop/src-tauri/tauri.conf.json` (`version`)
+  - `desktop/src-tauri/Cargo.toml` (`package.version`)
 
 ## Workflow
 
 Use:
 
-- `.github/workflows/desktop-release.yml`
+- `.github/workflows/release.yml` (run manually, `workflow_dispatch`, with the
+  `version` input and an optional `prerelease` flag). Desktop and PyPI releases
+  share this one workflow.
 
-Job flow:
+Desktop job flow:
 
-1. Validate semver + cross-file version alignment.
-2. Freeze sidecar on Linux + Windows.
-3. Stage sidecar into Tauri `externalBin` path.
-4. Build installers per target.
-5. Generate CycloneDX SBOM artifacts.
-6. Attach installers + SBOMs to GitHub Release tag.
+1. `validate` — semver, tag, and cross-file version alignment (above).
+2. `ci` — the reusable `ci.yml` gate.
+3. `freeze-server` — freeze the sidecar per target: Linux x64, Windows x64,
+   macOS arm64, macOS x64.
+4. `package-desktop` — stage the frozen sidecar into the Tauri `externalBin`
+   path and run `tauri build` per target (`.msi`, `.deb` + `.AppImage`,
+   `.dmg`).
+5. `sbom` — Syft CycloneDX SBOMs for the Python, Node and Rust trees. This job
+   is `continue-on-error: true`, which keeps a failed SBOM from failing the
+   run. `create-release` needs it, though, and GitHub documents that a failed
+   job skips the jobs that need it without saying whether `continue-on-error`
+   changes that. Treat a failed `sbom` as possibly blocking `create-release`,
+   and check the SBOM assets (below).
+6. `create-release` — normalize asset names, push the `v<version>` tag, and
+   create the GitHub Release with the wheel and sdist, the installers, the
+   SBOMs and `metrics.json`. It needs `validate`, `build-python`,
+   `smoke-test`, `package-desktop`, `sbom` and `metrics`.
 
 ## Sidecar Freeze Guards
 
@@ -57,11 +75,21 @@ Job flow:
 2. Confirm port `3010` is documented as reserved in user-facing release notes.
 3. Confirm release assets include at minimum:
    - Windows `.msi`
-   - Linux `.AppImage` and/or `.deb`
+   - Linux `.AppImage` and `.deb`
+   - macOS `.dmg` (aarch64 and x64)
    - CycloneDX SBOM JSON files
 
 ## Notes
 
-1. macOS packaging remains a stretch target and is intentionally not hard-gated.
-2. Desktop release is intentionally separate from PyPI publish to keep failure
-   domains clear (installer build dependencies vs Python package publish path).
+1. macOS is built in the same `package-desktop` matrix as Windows and Linux,
+   so a failed macOS leg fails that job and `create-release` does not run.
+2. `publish-pypi` needs only `validate` and `build-python`, so it runs
+   alongside the desktop jobs and never waits for them. A desktop failure does
+   not stop the PyPI publish: the version can land on PyPI with no tag and no
+   GitHub Release. Re-running the workflow for the same version recovers —
+   no tag exists yet, so `validate` passes, and the publish step uses
+   `skip-existing: true`.
+3. Re-running only the failed jobs of the same run also recovers, without
+   rebuilding: GitHub re-runs the failed jobs and the ones they gated. 0.15.0
+   went out this way after `smoke-test` failed because PyPI's index had not
+   yet listed the new version.

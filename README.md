@@ -92,7 +92,7 @@ Important system requirement:
 
 Desktop workflows/docs:
 
-1. Desktop release workflow: `.github/workflows/desktop-release.yml`
+1. Desktop release workflow: `.github/workflows/release.yml` (`package-desktop` job)
 2. Desktop wrapper source: `desktop/src-tauri/`
 3. Desktop handoff guide: `docs/release-desktop-handoff.md`
 

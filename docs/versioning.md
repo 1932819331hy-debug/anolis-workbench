@@ -56,7 +56,7 @@ GitHub release creation occurs only after publish and smoke checks pass.
 Desktop release rule:
 
 - Native desktop bundles and SBOM artifacts are attached to the same release tag
-  through `desktop-release.yml`.
+  by `release.yml`, the same workflow that publishes to PyPI.
 
 ## Pre-release
 
