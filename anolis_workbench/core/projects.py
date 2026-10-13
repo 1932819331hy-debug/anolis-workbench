@@ -13,11 +13,9 @@ import jsonschema
 
 from anolis_workbench.core import canonical, canonical_validator, machine_profile, migrations, provider_schemas
 from anolis_workbench.core import paths as paths_module
-from anolis_workbench.core import validator as semantic_validator
 
 SYSTEMS_ROOT = paths_module.SYSTEMS_ROOT
 TEMPLATES_ROOT = paths_module.TEMPLATES_ROOT
-SYSTEM_SCHEMA_PATH = paths_module.SYSTEM_SCHEMA_PATH
 
 NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
@@ -41,8 +39,6 @@ def _serialized(fn):
 
     return _wrapped
 
-
-_SYSTEM_SCHEMA_CACHE: dict | None = None
 
 SIDECAR_NAME = machine_profile.SIDECAR_NAME
 
@@ -93,120 +89,8 @@ def _json_path_from_iter(path_parts: list) -> str:
     return out
 
 
-def _load_system_schema() -> dict:
-    global _SYSTEM_SCHEMA_CACHE
-    if _SYSTEM_SCHEMA_CACHE is None:
-        payload = json.loads(SYSTEM_SCHEMA_PATH.read_text(encoding="utf-8"))
-        if not isinstance(payload, dict):
-            raise RuntimeError(f"Invalid system schema at {SYSTEM_SCHEMA_PATH}: root must be object")
-        _SYSTEM_SCHEMA_CACHE = payload
-    return _SYSTEM_SCHEMA_CACHE
-
-
-def validate_system_payload(system: object) -> list[dict[str, str]]:
-    """Return structured validation errors for a system document."""
-    if not isinstance(system, dict):
-        return [
-            {
-                "source": "schema",
-                "code": "schema.type",
-                "path": "$",
-                "message": "system payload must be a JSON object",
-            }
-        ]
-
-    schema = _load_system_schema()
-    schema_validator = jsonschema.Draft7Validator(schema)
-    schema_errors = sorted(schema_validator.iter_errors(system), key=lambda err: list(err.path))
-    if schema_errors:
-        return [
-            {
-                "source": "schema",
-                "code": "schema.validation",
-                "path": _json_path_from_iter(list(err.path)),
-                "message": err.message,
-            }
-            for err in schema_errors
-        ]
-
-    errors = _validate_provider_configs(system)
-    semantic_messages = semantic_validator.validate_system(system)
-    errors.extend(
-        {
-            "source": "semantic",
-            "code": "semantic.validation",
-            "path": "$",
-            "message": msg,
-        }
-        for msg in semantic_messages
-    )
-    return errors
-
-
-def _validate_provider_configs(system: dict) -> list[dict[str, str]]:
-    """Validate each provider's config against its vendored --config-schema
-    envelope (Draft 2020-12) plus the x-anolis-unique annotations."""
-    errors: list[dict[str, str]] = []
-    providers = system.get("topology", {}).get("providers", {})
-    if not isinstance(providers, dict):
-        return errors
-
-    for pid, entry in providers.items():
-        if not isinstance(entry, dict):
-            continue
-        kind = entry.get("kind")
-        base_path = f"$.topology.providers.{pid}"
-        envelope = provider_schemas.get_envelope(kind) if isinstance(kind, str) else None
-        if envelope is None:
-            known = ", ".join(provider_schemas.available_kinds())
-            errors.append(
-                {
-                    "source": "provider-schema",
-                    "code": "provider.unknown_kind",
-                    "path": f"{base_path}.kind",
-                    "message": f"Unknown provider kind '{kind}' — no vendored config schema (known kinds: {known}).",
-                }
-            )
-            continue
-
-        config = entry.get("config")
-        provider_schema = envelope["schema"]
-        config_validator = jsonschema.Draft202012Validator(provider_schema)
-        for err in sorted(config_validator.iter_errors(config), key=lambda e: list(e.path)):
-            errors.append(
-                {
-                    "source": "provider-schema",
-                    "code": "provider.schema",
-                    "path": f"{base_path}.config" + _json_path_from_iter(list(err.path))[1:],
-                    "message": err.message,
-                }
-            )
-        for violation in provider_schemas.unique_violations(provider_schema, config):
-            errors.append(
-                {
-                    "source": "provider-schema",
-                    "code": "provider.unique",
-                    "path": f"{base_path}.config" + violation["path"][1:],
-                    "message": violation["message"],
-                }
-            )
-    return errors
-
-
 def project_dir(name: str) -> pathlib.Path:
     return SYSTEMS_ROOT / name
-
-
-def system_json_path(name: str) -> pathlib.Path:
-    return project_dir(name) / "system.json"
-
-
-def runtime_yaml_path(name: str) -> pathlib.Path:
-    return project_dir(name) / "anolis-runtime.yaml"
-
-
-def provider_yaml_path(name: str, provider_id: str) -> pathlib.Path:
-    return project_dir(name) / "providers" / f"{provider_id}.yaml"
 
 
 def running_json_path(name: str) -> pathlib.Path:

@@ -290,32 +290,4 @@ def _bind_errors(variants: dict[str, Any]) -> list[str]:
     return errors
 
 
-def path_token_warnings(profile: dict[str, Any], project_dir_name: str) -> list[str]:
-    """GATE 3 (install.sh keys path rewrites on the deploy dir basename)."""
-    machine_id = profile.get("machine_id")
-    if not isinstance(machine_id, str) or machine_id == project_dir_name:
-        return []
-    return [
-        f"machine_id '{machine_id}' differs from the deploy directory name "
-        f"'{project_dir_name}'; install.sh keys its path rewrites on the directory name."
-    ]
-
-
-def unknown_kind_errors(providers: dict[str, Any]) -> list[str]:
-    """Kinds without a vendored config schema cannot be form-edited."""
-    from anolis_workbench.core import provider_schemas
-
-    errors: list[str] = []
-    for pid, entry in sorted(providers.items()):
-        kind = entry.get("kind") if isinstance(entry, dict) else None
-        if kind is None:
-            errors.append(
-                f"Provider '{pid}' has no derivable kind (check components.providers and the config filename)."
-            )
-        elif provider_schemas.get_envelope(kind) is None:
-            known = ", ".join(provider_schemas.available_kinds())
-            errors.append(f"Provider '{pid}' has unknown kind '{kind}' (known: {known}).")
-    return errors
-
-
-__all__ = ["validate_project", "path_token_warnings", "unknown_kind_errors"]
+__all__ = ["validate_project"]

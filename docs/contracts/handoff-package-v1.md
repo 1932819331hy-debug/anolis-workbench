@@ -39,7 +39,8 @@ For identical project input state, exported bytes are identical across wrappers
 1. Stable file ordering in archive.
 2. Stable zip metadata.
 3. Deterministic `meta/provenance.json.exported_at`:
-   - derived from `system.json.meta.created` (UTC second precision), or
+   - derived from `meta.created` in the project's `workbench.json` sidecar
+     (UTC second precision), or
    - fallback `1970-01-01T00:00:00Z` when absent/unparseable.
 
 ## Security and Secret Policy

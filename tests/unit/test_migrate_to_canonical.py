@@ -2,8 +2,9 @@
 
 The acceptance criterion for #255 is "existing projects migrate via the current
 renderer output", so the load-bearing test here is PARITY: a migrated project's
-runtime config must equal what `renderer.render` produces today, modulo the
-deploy-token rewrite that is the whole point of the change.
+runtime config must equal what the retired `renderer.render` produced, modulo
+the deploy-token rewrite that is the whole point of the change. That output is
+frozen beside each fixture as `<template>.rendered-runtime.yaml`.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import pathlib
 import pytest
 import yaml
 
-from anolis_workbench.core import canonical, canonical_validator, migrations, renderer
+from anolis_workbench.core import canonical, canonical_validator, migrations
 
 # The bundled templates are canonical dirs now (#255); these are the last
 # system.json templates, frozen so the migration path stays covered.
@@ -43,9 +44,9 @@ def _without_deploy_tokens(runtime_doc: dict) -> dict:
 
 
 @pytest.mark.parametrize("template", TEMPLATE_NAMES)
-def test_migrated_runtime_config_matches_the_current_renderer(tmp_path: pathlib.Path, template: str) -> None:
-    pdir, system = _legacy_project(tmp_path, template)
-    expected = yaml.safe_load(renderer.render(system, template)["anolis-runtime.yaml"])
+def test_migrated_runtime_config_matches_the_retired_renderer(tmp_path: pathlib.Path, template: str) -> None:
+    pdir, _ = _legacy_project(tmp_path, template)
+    expected = yaml.safe_load((LEGACY_TEMPLATES / f"{template}.rendered-runtime.yaml").read_text(encoding="utf-8"))
 
     migrated, _ = migrations.migrate_project_dir(pdir, project_name=template)
     assert migrated
@@ -57,12 +58,8 @@ def test_migrated_runtime_config_matches_the_current_renderer(tmp_path: pathlib.
 @pytest.mark.parametrize("template", TEMPLATE_NAMES)
 def test_migrated_provider_configs_are_unchanged(tmp_path: pathlib.Path, template: str) -> None:
     pdir, system = _legacy_project(tmp_path, template)
-    rendered = renderer.render(system, template)
-    expected = {
-        rel.split("/")[-1].removesuffix(".yaml"): yaml.safe_load(text)
-        for rel, text in rendered.items()
-        if rel.startswith("providers/")
-    }
+    # The retired renderer dumped each non-empty v2 config verbatim.
+    expected = {pid: entry["config"] for pid, entry in system["topology"]["providers"].items() if entry.get("config")}
 
     migrations.migrate_project_dir(pdir, project_name=template)
     actual = {pid: entry["config"] for pid, entry in canonical.read_project(pdir)["providers"].items()}

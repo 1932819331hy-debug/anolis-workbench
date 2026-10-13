@@ -69,10 +69,6 @@ PROVIDER_SCHEMAS_DIR = _select_asset_path(
     _SOURCE_ASSET_ROOT / "schemas" / "providers",
     _PACKAGED_ASSET_ROOT / "schemas" / "providers",
 )
-SYSTEM_SCHEMA_PATH = _select_asset_path(
-    _SOURCE_ASSET_ROOT / "schemas" / "system.schema.json",
-    _PACKAGED_ASSET_ROOT / "schemas" / "system.schema.json",
-)
 
 
 def resolve_data_path(path_value: str) -> pathlib.Path:

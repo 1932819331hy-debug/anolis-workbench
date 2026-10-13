@@ -1,0 +1,31 @@
+runtime:
+  name: anolis-main
+  shutdown_timeout_ms: 2000
+  startup_timeout_ms: 30000
+http:
+  enabled: true
+  bind: 127.0.0.1
+  port: 8080
+  cors_allow_credentials: false
+  cors_allowed_origins:
+  - http://localhost:3000
+  - http://127.0.0.1:3000
+providers:
+- id: sim0
+  command: ../anolis-provider-sim/build/dev-windows-release/Release/anolis-provider-sim.exe
+  args:
+  - --config
+  - systems/sim-quickstart/providers/sim0.yaml
+  timeout_ms: 5000
+  hello_timeout_ms: 2000
+  ready_timeout_ms: 10000
+  restart_policy:
+    enabled: false
+polling:
+  interval_ms: 500
+telemetry:
+  enabled: false
+automation:
+  enabled: false
+logging:
+  level: info

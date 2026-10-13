@@ -11,9 +11,8 @@ import json
 import pathlib
 
 import pytest
-import yaml
 
-from anolis_workbench.core import canonical, machine_profile, migrations, projects, renderer
+from anolis_workbench.core import canonical, machine_profile, migrations, projects
 
 V1_FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures" / "v1-templates"
 # The bundled templates are canonical dirs since #255, so the v2 documents they
@@ -32,6 +31,17 @@ def _load_v2_template(name: str) -> dict:
     return json.loads((V2_FIXTURES / f"{name}.json").read_text(encoding="utf-8"))  # type: ignore[no-any-return]
 
 
+def _validate_through_canonical(tmp_path: pathlib.Path, v2: dict) -> list[dict[str, str]]:
+    """Carry a migrated v2 document on to canonical artifacts and run the live
+    save-time validation, which checks each provider config against its
+    vendored --config-schema envelope."""
+    pdir = tmp_path / "migrated"
+    pdir.mkdir()
+    (pdir / "system.json").write_text(json.dumps(v2), encoding="utf-8")
+    migrations.migrate_project_dir(pdir, project_name="migrated")
+    return projects.validate_project_payload(canonical.read_project(pdir), pdir)
+
+
 @pytest.mark.parametrize("name", TEMPLATE_NAMES)
 def test_v1_template_migrates_to_checked_in_v2_template(name: str) -> None:
     migrated, changed = migrations.migrate_system(_load_v1(name))
@@ -40,9 +50,9 @@ def test_v1_template_migrates_to_checked_in_v2_template(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", TEMPLATE_NAMES)
-def test_migrated_document_passes_full_validation(name: str) -> None:
+def test_migrated_document_passes_full_validation(name: str, tmp_path: pathlib.Path) -> None:
     migrated, _ = migrations.migrate_system(_load_v1(name))
-    assert projects.validate_system_payload(migrated) == []
+    assert _validate_through_canonical(tmp_path, migrated) == []
 
 
 @pytest.mark.parametrize("name", TEMPLATE_NAMES)
@@ -74,14 +84,14 @@ def test_addresses_keep_their_authored_hex_string_form() -> None:
     assert [d["address"] for d in bread["devices"]] == ["0x0A", "0x14", "0x15"]
 
 
-def test_render_parity_with_old_renderer_output() -> None:
-    """Migrated-then-rendered configs must match what the old per-kind renderer
-    emitted for the same v1 document, modulo the address representation
-    (old: ints; now: the authored hex strings, which providers parse)."""
+def test_migrated_configs_match_the_old_renderer_values() -> None:
+    """Migrated configs must carry the values the old per-kind renderer
+    emitted for the same v1 document (frozen here as literals), modulo the address representation (old: ints; now:
+    the authored hex strings, which providers parse)."""
     migrated, _ = migrations.migrate_system(_load_v1("bioreactor-manual"))
-    outputs = renderer.render(migrated, "bioreactor-manual")
+    providers = migrated["topology"]["providers"]
 
-    bread = yaml.safe_load(outputs["providers/bread0.yaml"])
+    bread = providers["bread0"]["config"]
     assert bread["provider"] == {"name": "bread0"}
     assert bread["hardware"] == {
         "bus_path": "/dev/i2c-1",
@@ -95,12 +105,12 @@ def test_render_parity_with_old_renderer_output() -> None:
     assert [int(str(d["address"]), 0) for d in bread["devices"]] == [10, 20, 21]
     assert [d["id"] for d in bread["devices"]] == ["rlht0", "dcmt0", "dcmt1"]
 
-    ezo = yaml.safe_load(outputs["providers/ezo0.yaml"])
+    ezo = providers["ezo0"]["config"]
     assert ezo["discovery"] == {"mode": "manual"}
     assert [int(str(d["address"]), 0) for d in ezo["devices"]] == [0x63, 0x61]
 
     sim_migrated, _ = migrations.migrate_system(_load_v1("sim-quickstart"))
-    sim = yaml.safe_load(renderer.render(sim_migrated, "sim-quickstart")["providers/sim0.yaml"])
+    sim = sim_migrated["topology"]["providers"]["sim0"]["config"]
     assert sim["provider"] == {"name": "sim0"}
     assert sim["startup_policy"] == "degraded"
     assert sim["simulation"] == {"mode": "non_interacting", "tick_rate_hz": 10.0}
@@ -108,7 +118,7 @@ def test_render_parity_with_old_renderer_output() -> None:
     assert sim["devices"][1] == {"id": "motorctl0", "type": "motorctl", "max_speed": 3000.0}
 
 
-def test_empty_provider_name_is_omitted_not_migrated_invalid() -> None:
+def test_empty_provider_name_is_omitted_not_migrated_invalid(tmp_path: pathlib.Path) -> None:
     """The old composer seeded provider_name: "" on new bread/ezo providers;
     migrating that to provider.name "" would violate the envelope pattern on a
     doc the user never touched. It must be omitted (provider defaults the name)."""
@@ -116,10 +126,10 @@ def test_empty_provider_name_is_omitted_not_migrated_invalid() -> None:
     v1["topology"]["providers"]["bread0"]["provider_name"] = ""
     migrated, _ = migrations.migrate_system(v1)
     assert "provider" not in migrated["topology"]["providers"]["bread0"]["config"]
-    assert projects.validate_system_payload(migrated) == []
+    assert _validate_through_canonical(tmp_path, migrated) == []
 
 
-def test_bus_device_extras_are_preserved() -> None:
+def test_bus_device_extras_are_preserved(tmp_path: pathlib.Path) -> None:
     """Migration is lossless: authored device keys beyond id/type/label/address
     (e.g. command_watchdog_ms, which the bread envelope describes) survive."""
     v1 = _load_v1("mixed-bus-mock")
@@ -127,19 +137,14 @@ def test_bus_device_extras_are_preserved() -> None:
     migrated, _ = migrations.migrate_system(v1)
     device = migrated["topology"]["providers"]["bread0"]["config"]["devices"][0]
     assert device["command_watchdog_ms"] == 500
-    assert projects.validate_system_payload(migrated) == []
+    assert _validate_through_canonical(tmp_path, migrated) == []
 
 
-def test_unknown_kind_empty_config_renders_no_yaml() -> None:
-    """An unknown-kind provider migrates to config {}; the renderer must NOT
-    emit '{}' for it, or the exporter/deploy disk fallback for hand-authored
-    provider YAML would be shadowed."""
+def test_unknown_kind_migrates_to_an_empty_config() -> None:
     v1 = _load_v1("sim-quickstart")
     v1["topology"]["providers"]["custom0"] = {"kind": "custom"}
     migrated, _ = migrations.migrate_system(v1)
     assert migrated["topology"]["providers"]["custom0"] == {"kind": "custom", "config": {}}
-    outputs = renderer.render(migrated, "custom-test")
-    assert "providers/custom0.yaml" not in outputs
 
 
 def test_get_project_backs_up_the_legacy_document(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> None:

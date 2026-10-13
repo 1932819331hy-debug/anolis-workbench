@@ -527,18 +527,6 @@ def test_workbench_port_conflict_is_reported() -> None:
     assert any("3010" in e for e in errors), errors
 
 
-def test_unknown_kind_errors_uses_the_vendored_envelopes() -> None:
-    assert canonical_validator.unknown_kind_errors({"bread0": {"kind": "bread"}}) == []
-    assert canonical_validator.unknown_kind_errors({"x0": {"kind": "nope"}}) != []
-    assert canonical_validator.unknown_kind_errors({"x0": {"kind": None}}) != []
-
-
-def test_path_token_warning_on_dir_name_mismatch() -> None:
-    profile = {"machine_id": "rig-a"}
-    assert canonical_validator.path_token_warnings(profile, "rig-a") == []
-    assert canonical_validator.path_token_warnings(profile, "other") != []
-
-
 # ---------------------------------------------------------------------------
 # Adversarial-review regressions (PR 1 hardening)
 # ---------------------------------------------------------------------------
