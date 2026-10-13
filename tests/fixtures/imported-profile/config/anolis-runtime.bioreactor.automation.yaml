@@ -60,9 +60,15 @@ automation:
     - name: impeller_enable
       type: bool
       default: false
+    # Deliberately not the top of the range. impeller_pwm is a continuous-duty
+    # setpoint with only impeller_enable in front of it — unlike the dose pumps,
+    # which are also gated by a rate cap of 0 — so enabling the impeller is the
+    # one obvious action after activating automation, and whatever sits here is
+    # what a first run does. 100 ran continuously through a full culture; raise
+    # it deliberately, not by default.
     - name: impeller_pwm
       type: int64
-      default: 255
+      default: 100
       min: 0
       max: 255
     - name: dose1_enable
