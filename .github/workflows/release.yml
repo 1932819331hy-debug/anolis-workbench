@@ -58,33 +58,38 @@ jobs:
             exit 1
           fi
 
-          PYPROJECT_VERSION=$(python3 -c "import pathlib,tomllib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
-          DESKTOP_PACKAGE_VERSION=$(python3 -c "import json,pathlib; print(json.loads(pathlib.Path('desktop/package.json').read_text())['version'])")
-          FRONTEND_PACKAGE_VERSION=$(python3 -c "import json,pathlib; print(json.loads(pathlib.Path('frontend/package.json').read_text())['version'])")
-          TAURI_CONF_VERSION=$(python3 -c "import json,pathlib; print(json.loads(pathlib.Path('desktop/src-tauri/tauri.conf.json').read_text())['version'])")
-          CARGO_VERSION=$(python3 -c "import pathlib,tomllib; print(tomllib.loads(pathlib.Path('desktop/src-tauri/Cargo.toml').read_text())['package']['version'])")
+          # Every location in version-locations.txt, the same list and regex
+          # semantics CI's version-sync check reads, compared against the
+          # requested version rather than only against each other (#295).
+          VERSION="$VERSION" python3 - <<'PY'
+          import os, pathlib, re, sys
 
-          ERRORS=""
-          for pair in \
-            "pyproject.toml:$PYPROJECT_VERSION" \
-            "desktop/package.json:$DESKTOP_PACKAGE_VERSION" \
-            "frontend/package.json:$FRONTEND_PACKAGE_VERSION" \
-            "desktop/src-tauri/tauri.conf.json:$TAURI_CONF_VERSION" \
-            "desktop/src-tauri/Cargo.toml:$CARGO_VERSION"; do
-            FILE="${pair%%:*}"
-            FOUND="${pair#*:}"
-            if [[ "$FOUND" != "$VERSION" ]]; then
-              ERRORS="${ERRORS}  ${FILE}: found ${FOUND}, expected ${VERSION}\n"
-            fi
-          done
+          expected = os.environ["VERSION"]
+          errors, checked = [], 0
+          for line in pathlib.Path("version-locations.txt").read_text(encoding="utf-8").splitlines():
+              line = line.strip()
+              if not line or line.startswith("#"):
+                  continue
+              path, regex = (part.strip() for part in line.split(":", 1))
+              checked += 1
+              try:
+                  content = pathlib.Path(path).read_text(encoding="utf-8")
+              except FileNotFoundError:
+                  errors.append(f"  {path}: file not found")
+                  continue
+              m = re.search(regex, content, re.MULTILINE)
+              if not m:
+                  errors.append(f"  {path}: no version matches {regex}")
+              elif m.group(1) != expected:
+                  errors.append(f"  {path}: found {m.group(1)}, expected {expected}")
 
-          if [[ -n "$ERRORS" ]]; then
-            echo "Version mismatch(es):"
-            echo -e "$ERRORS"
-            exit 1
-          fi
+          if errors:
+              print("Version mismatch(es):")
+              print("\n".join(errors))
+              sys.exit(1)
+          print(f"All {checked} version locations match: {expected}")
+          PY
 
-          echo "All 6 version locations match: $VERSION"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
   # =========================================================================
