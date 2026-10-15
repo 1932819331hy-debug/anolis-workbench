@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import json
+import socket
+import struct
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from anolis_workbench.server.routes import provision
 
@@ -122,6 +129,67 @@ class TestGetStatus:
         output = handler.wfile.getvalue().decode()
         assert "download" in output
         assert "done" in output
+
+    @pytest.mark.parametrize("error", [BrokenPipeError, ConnectionResetError, ConnectionAbortedError])
+    def test_any_disconnect_error_ends_the_stream(self, error: type[OSError]) -> None:
+        class GoneClient(BytesIO):
+            def write(self, _data: Any) -> int:
+                raise error()
+
+        job = provision._create_job()
+        job.events.append({"stage": "download", "detail": "downloading runtime"})
+        handler = FakeHandler()
+        handler.wfile = GoneClient()
+        try:
+            provision.get_status(handler, job.job_id)
+        finally:
+            job.status = "done"
+
+    def test_client_gone_before_next_event_ends_quietly(self) -> None:
+        """A closed EventSource (reload, closed tab) must not log a traceback
+        or keep the handler waiting on the job (#468)."""
+        errors: list[BaseException | None] = []
+        returned: list[bool] = []
+        finished = threading.Event()
+
+        class Server(ThreadingHTTPServer):
+            def handle_error(self, request: Any, client_address: Any) -> None:
+                errors.append(sys.exc_info()[1])
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, fmt: str, *args: Any) -> None:
+                pass
+
+            def do_GET(self) -> None:
+                try:
+                    provision.get_status(self, self.path.split("/")[-1])
+                    returned.append(True)
+                finally:
+                    finished.set()
+
+        job = provision._create_job()
+        server = Server(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            client = socket.create_connection(("127.0.0.1", server.server_port), timeout=5)
+            client.sendall(f"GET /api/provision/status/{job.job_id} HTTP/1.1\r\nHost: x\r\n\r\n".encode())
+            received = b""
+            while b"\r\n\r\n" not in received:
+                received += client.recv(1024)
+            # Reset rather than FIN, so the server's next write fails at once.
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            client.close()
+
+            job.events.append({"stage": "download", "detail": "downloading runtime"})
+            job.events.append({"stage": "verify", "detail": "verifying runtime"})
+
+            assert finished.wait(5), "handler still waiting on the job"
+        finally:
+            job.status = "done"
+            server.shutdown()
+            server.server_close()
+        assert errors == []
+        assert returned == [True]
 
 
 class TestJobManagement:

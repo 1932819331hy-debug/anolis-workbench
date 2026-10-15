@@ -14,6 +14,8 @@ import io
 import urllib.request
 from typing import Any
 
+import pytest
+
 from anolis_workbench.server.routes import operate
 
 
@@ -163,3 +165,43 @@ def test_runtime_base_follows_the_launch_variant(monkeypatch) -> None:
 
     base, _, _ = operate._runtime_base()
     assert base == "http://127.0.0.1:9090"
+
+
+class _GoneClient(io.BytesIO):
+    """A response stream whose client has disconnected."""
+
+    def __init__(self, error: type[OSError]) -> None:
+        super().__init__()
+        self.error = error
+
+    def write(self, _data: Any) -> int:
+        raise self.error()
+
+
+class _EventStream(_FakeResponse):
+    def __init__(self) -> None:
+        self.reads = 0
+        self.closed = False
+
+    def read(self, *_args: Any) -> bytes:
+        self.reads += 1
+        return b"data: {}\n\n"
+
+    def __exit__(self, *_exc: Any) -> None:
+        self.closed = True
+
+
+@pytest.mark.parametrize("error", [BrokenPipeError, ConnectionResetError, ConnectionAbortedError])
+def test_event_stream_ends_quietly_when_the_client_leaves(monkeypatch, error: type[OSError]) -> None:
+    """A closed Operate tab must not raise out of the /v0/events proxy, and
+    the proxy must stop reading the runtime's stream for it (#468)."""
+    monkeypatch.setenv("ANOLIS_WORKBENCH_RUNTIME_URL", "http://192.0.2.10:8080")
+    upstream = _EventStream()
+    monkeypatch.setattr(operate.urllib.request, "urlopen", lambda req: upstream)
+
+    handler = _FakeHandler()
+    handler.wfile = _GoneClient(error)
+    operate.proxy_runtime(handler, "GET", "/v0/events")
+
+    assert upstream.reads == 1
+    assert upstream.closed

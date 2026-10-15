@@ -119,8 +119,14 @@ def proxy_runtime(handler, method: str, raw_path: str) -> None:
                     chunk = response.read(4096)
                     if not chunk:
                         break
-                    handler.wfile.write(chunk)
-                    handler.wfile.flush()
+                    try:
+                        handler.wfile.write(chunk)
+                        handler.wfile.flush()
+                    except OSError:
+                        # The client went away (a closed tab); stop reading
+                        # the runtime's stream for it.
+                        handler.close_connection = True
+                        break
                 return
 
             data = response.read()

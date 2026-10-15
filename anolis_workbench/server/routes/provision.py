@@ -247,23 +247,27 @@ def get_status(handler: Any, job_id: str) -> None:
     sent = 0
     import time
 
-    while True:
-        # Send any new events
-        while sent < len(job.events):
-            event = job.events[sent]
-            data = json.dumps(event)
-            handler.wfile.write(f"data: {data}\n\n".encode())
-            handler.wfile.flush()
-            sent += 1
+    try:
+        while True:
+            # Send any new events
+            while sent < len(job.events):
+                event = job.events[sent]
+                data = json.dumps(event)
+                handler.wfile.write(f"data: {data}\n\n".encode())
+                handler.wfile.flush()
+                sent += 1
 
-        if job.status in ("done", "failed"):
-            # Send final status event
-            final = json.dumps({"stage": "status", "status": job.status, "error": job.error})
-            handler.wfile.write(f"data: {final}\n\n".encode())
-            handler.wfile.flush()
-            break
+            if job.status in ("done", "failed"):
+                # Send final status event
+                final = json.dumps({"stage": "status", "status": job.status, "error": job.error})
+                handler.wfile.write(f"data: {final}\n\n".encode())
+                handler.wfile.flush()
+                break
 
-        time.sleep(0.2)
+            time.sleep(0.2)
+    except OSError:
+        # The client went away (a reload, a closed tab); the job runs on.
+        handler.close_connection = True
 
 
 # ---------------------------------------------------------------------------
