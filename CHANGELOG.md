@@ -13,6 +13,25 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING:** `anolis-provision install|remote --with-observability` now
+  means the runtime `install.sh`'s native stack (#227): the flag is forwarded
+  to `install.sh --with-observability`, which installs InfluxDB and Grafana as
+  system services on the target. It used to run the release's Docker Compose
+  stack from `~/.anolis/observability` on the machine running the workbench.
+  Stop that stack (`docker compose down` there) before a local install, or its
+  InfluxDB keeps holding `:8086`. The provision summary now repeats
+  `install.sh`'s observability and Grafana lines, since `install.sh` reports
+  an observability failure as a warning and still exits 0. For a separate
+  monitoring host, run the release's `anolis-<version>-observability.tar.gz`
+  compose stack on that host.
+
+### Removed
+
+- **BREAKING:** `anolis-provision install|remote --start-observability`, with
+  the workbench's Docker observability step (#227).
+
 ## [0.15.0] - 2026-10-12
 
 ### Added

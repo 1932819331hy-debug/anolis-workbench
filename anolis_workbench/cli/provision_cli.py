@@ -72,17 +72,14 @@ def _parse_args() -> argparse.Namespace:
     install_parser.add_argument(
         "--with-observability",
         action="store_true",
-        help="Deploy the Docker-based observability stack (InfluxDB + Grafana).",
+        help="Install the observability stack (InfluxDB + Grafana) natively on the target (install.sh "
+        "--with-observability). For a separate monitoring host, run the runtime release's "
+        "anolis-<version>-observability.tar.gz compose stack there instead.",
     )
     install_parser.add_argument(
         "--with-telemetry-export",
         action="store_true",
         help="Install and configure the telemetry export service.",
-    )
-    install_parser.add_argument(
-        "--start-observability",
-        action="store_true",
-        help="Auto-start the observability stack with docker compose (requires Docker).",
     )
     install_parser.add_argument(
         "--workbench-service",
@@ -193,17 +190,14 @@ def _parse_args() -> argparse.Namespace:
     remote_parser.add_argument(
         "--with-observability",
         action="store_true",
-        help="Deploy the Docker-based observability stack (InfluxDB + Grafana).",
+        help="Install the observability stack (InfluxDB + Grafana) natively on the target (install.sh "
+        "--with-observability). For a separate monitoring host, run the runtime release's "
+        "anolis-<version>-observability.tar.gz compose stack there instead.",
     )
     remote_parser.add_argument(
         "--with-telemetry-export",
         action="store_true",
         help="Install and configure the telemetry export service.",
-    )
-    remote_parser.add_argument(
-        "--start-observability",
-        action="store_true",
-        help="Auto-start the observability stack with docker compose (requires Docker).",
     )
 
     # --- fleet subcommand (pass 9) ---
@@ -337,58 +331,6 @@ def _wants_telemetry_export(args: argparse.Namespace) -> bool:
     return bool(args.with_telemetry_export)
 
 
-def _run_observability_step(
-    args: argparse.Namespace,
-    runtime_version: str,
-    token: str | None,
-) -> None:
-    """Download and deploy the observability stack."""
-    import requests
-
-    from anolis_workbench.core import observability
-
-    # Check Docker if --start-observability
-    if args.start_observability:
-        available, detail = observability.check_docker_available()
-        if not available:
-            print(f"\nWARNING: {detail} — stack will be extracted but not started", file=sys.stderr)
-            args.start_observability = False
-
-    # The observability stack ships with every runtime release — use the
-    # version that was just deployed.
-    rt_version = runtime_version
-    rt_repo = releases.RUNTIME_REPO
-
-    # Download the observability tarball from the runtime release
-    asset_name = f"anolis-{rt_version}-observability.tar.gz"
-    _print_progress("download", f"Downloading observability stack: {asset_name}")
-
-    session = requests.Session()
-    headers: dict[str, str] = {"Accept": "application/octet-stream"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-
-    url = f"https://github.com/{rt_repo}/releases/download/v{rt_version}/{asset_name}"
-    resp = session.get(url, headers=headers, timeout=120)
-    if resp.status_code != 200:
-        print(f"\nWARNING: Failed to download observability stack ({resp.status_code})", file=sys.stderr)
-        return
-
-    _print_progress("install", "Deploying observability stack")
-    obs_result = observability.deploy_observability(
-        resp.content,
-        start=args.start_observability,
-    )
-
-    if obs_result.error:
-        print(f"\nWARNING: observability: {obs_result.error}", file=sys.stderr)
-    elif obs_result.started:
-        _print_progress("done", f"Observability stack running at {obs_result.stack_path}")
-    else:
-        _print_progress("done", f"Observability stack extracted to {obs_result.stack_path}")
-        print(f"    To start: cd {obs_result.stack_path} && docker compose up -d")
-
-
 DEFAULT_TEMPLATE = "sim-quickstart"
 
 
@@ -444,14 +386,31 @@ def _print_host_followups(result: deploy.DeployResult) -> None:
         )
 
 
+def _print_observability(result: deploy.DeployResult) -> None:
+    """What install.sh's observability phase said. It warns and still exits
+    0 on every failure, so without this an offline target reports success
+    with nothing installed."""
+    lines = deploy.observability_lines(result.output)
+    print()
+    print("  Observability (install.sh):")
+    if not lines:
+        print("    install.sh printed no observability lines; the end of its output:")
+        lines = deploy._ANSI_RE.sub("", result.output).strip().splitlines()[-10:]
+        print("\n".join(f"    {line}" for line in lines))
+        print("\nWARNING: observability: install.sh did not report on it — check the output above", file=sys.stderr)
+        return
+    for line in lines:
+        print(f"    {line}")
+    if any(line.startswith("⚠") for line in lines):
+        print("\nWARNING: observability: install.sh reported a problem — see the lines above", file=sys.stderr)
+
+
 def _run_install(args: argparse.Namespace) -> int:
     """Execute the install subcommand: author the workspace, deploy via install.sh."""
     import os
 
     if not _validate_system_template(args):
         return 1
-
-    token = os.environ.get("GITHUB_TOKEN")
 
     print("Anolis Provision — Install")
     print(f"  Project:  {_resolve_names(args)[0]}")
@@ -480,17 +439,13 @@ def _run_install(args: argparse.Namespace) -> int:
             no_start=args.no_start,
             dry_run=args.dry_run,
             with_telemetry_export=_wants_telemetry_export(args),
+            with_observability=_wants_observability(args),
             allow_unmet_host=args.allow_unmet_host,
             progress_callback=_print_progress,
         )
     except deploy.DeployError as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
-
-    # Observability stack (if requested and not dry-run). Still workbench-owned
-    # until install.sh gains --with-observability (anolishq/anolis#162).
-    if _wants_observability(args) and not args.dry_run:
-        _run_observability_step(args, result.runtime_version, token)
 
     # Workbench systemd service (appliance mode, if requested and not dry-run)
     if getattr(args, "workbench_service", False) and not args.dry_run:
@@ -516,6 +471,8 @@ def _run_install(args: argparse.Namespace) -> int:
         print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
         print(f"  ✓ Project: {project_dir}")
         _print_host_followups(result)
+        if _wants_observability(args):
+            _print_observability(result)
         print()
         print("Next steps:")
         print("  systemctl status anolis-runtime")
@@ -598,7 +555,6 @@ def _parse_target(target: str) -> tuple[str, str]:
 
 def _run_remote(args: argparse.Namespace) -> int:
     """Execute the remote subcommand."""
-    import os
     import uuid
 
     from anolis_workbench.core.executor import SubprocessSSHExecutor
@@ -612,7 +568,6 @@ def _run_remote(args: argparse.Namespace) -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    token = os.environ.get("GITHUB_TOKEN")
     session_id = uuid.uuid4().hex[:12]
 
     print("Anolis Provision — Remote")
@@ -661,17 +616,13 @@ def _run_remote(args: argparse.Namespace) -> int:
             prefix=args.install_prefix,
             no_start=args.no_start,
             with_telemetry_export=_wants_telemetry_export(args),
+            with_observability=_wants_observability(args),
             allow_unmet_host=args.allow_unmet_host,
             progress_callback=_print_progress,
         )
     except deploy.DeployError as exc:
         print(f"\nERROR: {exc}", file=sys.stderr)
         return 1
-
-    # Observability stack (if requested) — runs on THIS machine (docker stack).
-    # Still workbench-owned until install.sh gains --with-observability (#162).
-    if _wants_observability(args):
-        _run_observability_step(args, result.runtime_version, token)
 
     # Print summary
     print()
@@ -681,6 +632,8 @@ def _run_remote(args: argparse.Namespace) -> int:
     print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
     print(f"  ✓ Project: {project_dir}")
     _print_host_followups(result)
+    if _wants_observability(args):
+        _print_observability(result)
     print()
     print("Next steps:")
     print(f"  ssh {user}@{host} systemctl status anolis-runtime")

@@ -265,6 +265,45 @@ def test_deploy_local_omits_telemetry_flag_by_default(
     assert "--with-telemetry-export" not in executor.commands[0]["cmd"]
 
 
+def test_deploy_local_threads_with_observability(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Observability is installed natively on the target by install.sh
+    # (anolishq/anolis#162); workbench requests it via the flag, and only when asked.
+    _stub_fetch(monkeypatch)
+    executor = RecordingExecutor()
+    deploy.deploy_local(
+        project_dir=project_dir,
+        project_name="deploy-fixture",
+        with_observability=True,
+        executor=executor,
+    )
+    assert "--with-observability" in executor.commands[0]["cmd"]
+
+
+def test_deploy_local_omits_observability_flag_by_default(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_fetch(monkeypatch)
+    executor = RecordingExecutor()
+    deploy.deploy_local(
+        project_dir=project_dir,
+        project_name="deploy-fixture",
+        executor=executor,
+    )
+    assert "--with-observability" not in executor.commands[0]["cmd"]
+
+
+def test_deploy_remote_threads_with_observability(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_fetch(monkeypatch)
+    executor = RecordingExecutor()
+    deploy.deploy_remote(
+        executor=executor,
+        project_dir=project_dir,
+        project_name="deploy-fixture",
+        with_observability=True,
+    )
+    assert "--with-observability" in executor.commands[-1]["cmd"]
+
+
 def test_deploy_local_raises_on_install_failure(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_fetch(monkeypatch)
     executor = RecordingExecutor(returncode=1)

@@ -21,7 +21,6 @@ _ALLOWED_COMMANDS: set[str] = {
     "cp",
     "curl",
     "df",
-    "docker",
     "echo",
     "false",
     "groups",

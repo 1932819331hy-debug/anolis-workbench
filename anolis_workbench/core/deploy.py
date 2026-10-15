@@ -330,6 +330,7 @@ def _install_args(
     no_start: bool,
     dry_run: bool,
     with_telemetry_export: bool = False,
+    with_observability: bool = False,
     variant: str | None = None,
     allow_unmet_host: bool = False,
 ) -> list[str]:
@@ -347,6 +348,10 @@ def _install_args(
     # on the operator's host.
     if with_telemetry_export:
         args.append("--with-telemetry-export")
+    # Likewise observability (anolishq/anolis#162): InfluxDB + Grafana are
+    # installed natively on the target, beside the runtime.
+    if with_observability:
+        args.append("--with-observability")
     if allow_unmet_host:
         args.append("--allow-unmet-host")
     return args
@@ -374,6 +379,28 @@ def host_preflight_block(stdout: str) -> list[str]:
             break
         block.append(line)
     return block
+
+
+_OBSERVABILITY_MARKS = ("observability:", "Grafana:")
+
+
+def observability_lines(stdout: str) -> list[str]:
+    """install.sh's observability and Grafana lines, ANSI stripped, each with
+    the indented detail that follows it. install.sh reports every
+    observability failure as a warning and still exits 0, so these lines
+    are the only place a failure shows."""
+    lines = _ANSI_RE.sub("", stdout).splitlines()
+    out: list[str] = []
+    in_block = False
+    for line in lines:
+        if any(mark in line for mark in _OBSERVABILITY_MARKS):
+            out.append(line)
+            in_block = True
+        elif in_block and line.startswith(" ") and line.strip():
+            out.append(line)
+        else:
+            in_block = False
+    return out
 
 
 def _message(line: str) -> str:
@@ -462,6 +489,7 @@ def deploy_local(
     no_start: bool = False,
     dry_run: bool = False,
     with_telemetry_export: bool = False,
+    with_observability: bool = False,
     variant: str | None = None,
     allow_unmet_host: bool = False,
     executor: Executor | None = None,
@@ -493,6 +521,7 @@ def deploy_local(
                 no_start=no_start,
                 dry_run=dry_run,
                 with_telemetry_export=with_telemetry_export,
+                with_observability=with_observability,
                 variant=variant,
                 allow_unmet_host=allow_unmet_host,
             ),
@@ -520,6 +549,7 @@ def deploy_remote(
     no_start: bool = False,
     dry_run: bool = False,
     with_telemetry_export: bool = False,
+    with_observability: bool = False,
     variant: str | None = None,
     allow_unmet_host: bool = False,
     remote_staging: str = "/tmp/anolis-deploy",
@@ -555,6 +585,7 @@ def deploy_remote(
                 no_start=no_start,
                 dry_run=dry_run,
                 with_telemetry_export=with_telemetry_export,
+                with_observability=with_observability,
                 variant=variant,
                 allow_unmet_host=allow_unmet_host,
             ),

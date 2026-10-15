@@ -65,6 +65,49 @@ anolis-validate <package.anpkg>
 python contracts/validate-handoff-packages.py <package.anpkg>
 ```
 
+Provision with observability (InfluxDB + Grafana installed natively on the
+target by the runtime's `install.sh --with-observability`):
+
+```sh
+anolis-provision install --with-observability
+anolis-provision remote --target user@host --with-observability
+```
+
+The provision summary repeats `install.sh`'s observability and Grafana lines.
+`install.sh` reports an observability failure (offline target, package
+install failed) as a warning and still exits 0, so read that section: the
+runtime is installed either way.
+
+Reaching Grafana: on runtime releases that bind Grafana to loopback
+(anolishq/anolis#359), it listens on `127.0.0.1:3000` on the target. Open a
+tunnel and browse `http://localhost:3000`:
+
+```sh
+ssh -L 3000:127.0.0.1:3000 user@host
+```
+
+`install.sh --with-grafana-network` opens Grafana to the network instead.
+`anolis-provision` does not forward that flag; run `install.sh` on the target
+yourself to use it. The admin password is `GRAFANA_ADMIN_PASSWORD` in
+`/etc/anolis/observability.env` on the target (root only).
+
+Switching from the old Docker stack: earlier workbench releases ran it from
+`~/.anolis/observability` on the machine running the workbench. On a local
+install, stop it before provisioning:
+
+```sh
+cd ~/.anolis/observability && docker compose down
+```
+
+A leftover InfluxDB container on `0.0.0.0:8086` keeps the native `influxd`
+from binding, and `install.sh` then finds the container's InfluxDB already
+set up and leaves its tokens alone.
+
+To keep InfluxDB and Grafana on a separate monitoring host instead, run the
+compose stack from the runtime release asset
+`anolis-<version>-observability.tar.gz` on that host; the workbench does not
+deploy it.
+
 ## Frontend Tests
 
 ```sh
