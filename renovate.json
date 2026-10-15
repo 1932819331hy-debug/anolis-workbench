@@ -1,6 +1,18 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["local>anolishq/renovate-config"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track the release tag each upstream schema lock pins. The PR stays red until scripts/sync-upstream-schema-from-release.py refreshes the lock's sha256s. See anolishq/anolis-workbench#369.",
+      "managerFilePatterns": ["/^contracts/upstream/.+\\.lock\\.json$/"],
+      "matchStrings": [
+        "\"repo\":\\s*\"(?<depName>[^\"]+)\",\\s*\\n(?:\\s*\"path\":\\s*\"[^\"]*\",\\s*\\n)?\\s*\"tag\":\\s*\"v(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v?(?<version>.+)$"
+    }
+  ],
   "packageRules": [
     {
       "description": "Group Tauri ecosystem updates",

@@ -69,6 +69,29 @@ Asset names default to the convention
 `--asset-template` / `--manifest-asset-template` **once** at onboarding; the
 patterns are stored in the lock and every later sync reads them back.
 
+### When Renovate bumps a lock
+
+Renovate tracks each lock's release tag (`renovate.json`, #369), so a new
+upstream release opens a PR that changes the tags only. That PR stays red
+until the asset names and sha256s are refreshed. On its branch, run the sync
+script once per lock the PR touches, with the new tag:
+
+```bash
+# An anolis release bumps all three anolis locks
+python3 scripts/sync-upstream-schema-from-release.py --schema runtime-config --tag vX.Y.Z
+python3 scripts/sync-upstream-schema-from-release.py --schema machine-profile --tag vX.Y.Z
+python3 scripts/sync-upstream-schema-from-release.py --schema runtime-http --tag vX.Y.Z
+
+# A provider release bumps that provider's lock
+python3 scripts/sync-upstream-schema-from-release.py --schema provider-config-<kind> --tag vX.Y.Z
+
+# Verify: each anolis lock by name, the provider locks all at once
+python3 scripts/verify-upstream-schema.py --schema runtime-config --require-release-artifact
+python3 scripts/verify-upstream-schema.py --all-providers --require-release-artifact
+```
+
+Commit the refreshed locks and vendored schemas to the Renovate branch.
+
 ### Lock `schema_version`
 
 | Version | Applies to | Shape |
