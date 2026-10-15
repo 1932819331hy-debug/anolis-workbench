@@ -79,7 +79,7 @@ def _wait_for_ready(base_url: str, proc: subprocess.Popen[str], timeout_s: float
 
 
 @pytest.fixture
-def composer_server(tmp_path: pathlib.Path) -> Generator[dict[str, Any], None, None]:
+def composer_server(request: pytest.FixtureRequest, tmp_path: pathlib.Path) -> Generator[dict[str, Any], None, None]:
     port = _pick_free_port()
     systems_root = tmp_path / "systems"
     systems_root.mkdir(parents=True, exist_ok=True)
@@ -89,6 +89,10 @@ def composer_server(tmp_path: pathlib.Path) -> Generator[dict[str, Any], None, N
     env["ANOLIS_TELEMETRY_URL"] = "http://localhost:3901"
     env["ANOLIS_WORKBENCH_OPEN_BROWSER"] = "0"
     env["ANOLIS_DATA_DIR"] = str(systems_root)
+    # The server reads this per request; an ambient value would change what
+    # these tests see. A test sets it through indirect parametrization.
+    env.pop("ANOLIS_WORKBENCH_RUNTIME_URL", None)
+    env.update(getattr(request, "param", {}))
     env["PYTHONPATH"] = f"{_REPO_ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
 
     proc = subprocess.Popen(
@@ -131,6 +135,16 @@ def test_config_contract_exposes_ui_defaults(composer_server: dict[str, Any]) ->
     status, payload = _http_json(composer_server["base_url"], "/api/config")
     assert status == 200
     assert payload.get("telemetry_url") == "http://localhost:3901"
+    assert payload.get("runtime_url_override") is False
+
+
+@pytest.mark.parametrize("composer_server", [{"ANOLIS_WORKBENCH_RUNTIME_URL": "http://192.0.2.10:8080"}], indirect=True)
+def test_config_contract_reports_a_runtime_url_override(composer_server: dict[str, Any]) -> None:
+    # Operate's other-project stop must not name the launched project when
+    # the /v0 proxy goes to this URL instead (#264).
+    status, payload = _http_json(composer_server["base_url"], "/api/config")
+    assert status == 200
+    assert payload.get("runtime_url_override") is True
 
 
 def test_control_contract_save_validation_failure_shape(composer_server: dict[str, Any]) -> None:

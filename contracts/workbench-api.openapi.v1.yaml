@@ -872,6 +872,11 @@ components:
         telemetry_url:
           type: string
           description: Telemetry dashboard URL for Operate iframe and external link
+        runtime_url_override:
+          type: boolean
+          description: >-
+            True when ANOLIS_WORKBENCH_RUNTIME_URL points the /v0 proxy at a
+            runtime other than the locally launched one.
       additionalProperties: true
 
     PreflightCheckItem:

@@ -44,6 +44,8 @@ export interface RuntimeStatus extends UnknownRecord {
 
 export interface WorkbenchConfig extends UnknownRecord {
   telemetry_url?: string;
+  /** The /v0 proxy targets ANOLIS_WORKBENCH_RUNTIME_URL, not the launched runtime. */
+  runtime_url_override?: boolean;
 }
 
 export interface PreflightCheck extends UnknownRecord {

@@ -137,6 +137,9 @@ class _Handler(BaseHTTPRequestHandler):
                 200,
                 {
                     "telemetry_url": self.config.telemetry_url,
+                    # Operate must not name the launched project as the target
+                    # of a /v0 call that goes elsewhere (#264).
+                    "runtime_url_override": bool(operate.runtime_url_override()),
                 },
             )
         elif path == "/api/update-check":

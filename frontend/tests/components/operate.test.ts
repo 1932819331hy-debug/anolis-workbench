@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import Operate from '../../src/routes/Operate.svelte';
@@ -128,5 +128,79 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
     ).toBeInTheDocument();
     expect(screen.getByTestId('safe-state-fix')).toHaveTextContent('config/anolis-runtime.manual.yaml');
     expect(screen.queryByText(/As reported by/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Operate.svelte — another project's runtime is running (#264)", () => {
+  function renderForOtherProject(config: Record<string, unknown> = {}) {
+    const posts: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = pathFromInput(input);
+        if (init?.method === 'POST') posts.push(path);
+        if (path === '/v0/estop')
+          return jsonResponse(200, { latched: true, software_safe_state: 'zero', actions: [] });
+        if (path === '/v0/runtime/status')
+          return status({ latched: true, software_safe_state: 'zero', uncovered_actuating_functions: 0 });
+        if (path === '/api/config') return jsonResponse(200, config);
+        return jsonResponse(200, {});
+      }),
+    );
+    const view = render(Operate, {
+      props: {
+        projectName: 'other',
+        system: createProjectDocument('other'),
+        runtimeStatus: RUNNING,
+      },
+    });
+    return { posts, view };
+  }
+
+  it("offers a software stop labelled with the running project, which latches that runtime", async () => {
+    const { posts } = renderForOtherProject();
+    expect(screen.getByText(/Runtime is running for "demo", not this project/)).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Software stop: demo' }));
+
+    await waitFor(() => expect(posts).toEqual(['/v0/estop']));
+    expect(await screen.findByText(/Software stop engaged \(zero\)/)).toBeInTheDocument();
+  });
+
+  it('offers no clear-latch control, even once the runtime reports the latch engaged', async () => {
+    const { posts } = renderForOtherProject();
+    await fireEvent.click(screen.getByRole('button', { name: 'Software stop: demo' }));
+    await screen.findByText(/Software stop engaged/);
+
+    expect(screen.queryByRole('button', { name: /Clear latch/ })).not.toBeInTheDocument();
+    expect(posts).not.toContain('/v0/estop/clear');
+  });
+
+  it('says it is not an emergency stop before it is pressed', () => {
+    renderForOtherProject();
+
+    expect(
+      screen.getByText('Not an emergency stop. For any physical hazard use the hardware emergency stop.'),
+    ).toBeInTheDocument();
+  });
+
+  it("does not show one project's stop result under another project's name", async () => {
+    const { view } = renderForOtherProject();
+    await fireEvent.click(screen.getByRole('button', { name: 'Software stop: demo' }));
+    await screen.findByText(/Software stop engaged \(zero\)/);
+
+    await view.rerender({ runtimeStatus: { running: true, active_project: 'foo' } });
+
+    expect(await screen.findByRole('button', { name: 'Software stop: foo' })).toBeInTheDocument();
+    expect(screen.queryByText(/Software stop engaged/)).not.toBeInTheDocument();
+  });
+
+  it('does not name the launched project when the proxy targets a runtime URL override', async () => {
+    renderForOtherProject({ telemetry_url: '', runtime_url_override: true });
+
+    expect(
+      await screen.findByRole('button', { name: 'Software stop: configured runtime URL' }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Software stop: demo' })).not.toBeInTheDocument();
   });
 });

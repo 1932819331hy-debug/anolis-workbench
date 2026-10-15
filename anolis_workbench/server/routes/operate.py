@@ -21,13 +21,18 @@ _HOP_BY_HOP_HEADERS = {
 }
 
 
+def runtime_url_override() -> str:
+    """The remote runtime the proxy targets instead of the launched one, or ""."""
+    return os.environ.get("ANOLIS_WORKBENCH_RUNTIME_URL", "").strip()
+
+
 def _runtime_base() -> tuple[str | None, str | None, int]:
     # Remote override: point the operate proxy at an already-provisioned
     # device instead of the locally-launched runtime. Pairs with
     # ANOLIS_WORKBENCH_RUNTIME_TOKEN for devices that require a Bearer token
     # (auth-by-default installs bind 0.0.0.0 with auth enabled). Interim
     # surface until the device-registry UX (anolishq/anolis#164).
-    override = os.environ.get("ANOLIS_WORKBENCH_RUNTIME_URL", "").strip()
+    override = runtime_url_override()
     if override:
         return override.rstrip("/"), None, 200
 

@@ -89,6 +89,9 @@
   let clearArmed = $state<boolean>(false);
   let estopFeedback = $state<string>("");
   let estopFeedbackClass = $state<string>("field-note");
+  // The running project a stop's result belongs to, so the advisory never
+  // shows one project's result under another's name (#264).
+  let estopFeedbackFor = $state<string | null>(null);
 
   let providerHealth = $state<ProviderHealth[]>([]);
   let devices = $state<Device[]>([]);
@@ -144,6 +147,9 @@
       stopOperate();
     }
   });
+
+  // The advisory's stop label depends on whether /v0 goes to an override.
+  void loadWorkbenchConfig();
 
   // The "confirm clear" arm is scoped to a single latched episode: any time the
   // latch is not engaged (cleared here, by another client, or before a fresh
@@ -386,6 +392,7 @@
     estopRunning = true;
     estopFeedback = "";
     estopFeedbackClass = "field-note";
+    estopFeedbackFor = runningProject;
     try {
       const res = await fetchJson<UnknownRecord>("/v0/estop", { method: "POST" });
       const summary = summarizeEstopResponse(res);
@@ -762,6 +769,24 @@
     <div class="workspace-advisory">
       {#if running && runningProject}
         Runtime is running for "{runningProject}", not this project.
+        <!-- The /v0 proxy targets the running project's runtime, so its stop
+             stays reachable here (#264). Clearing the latch belongs to that
+             project's own Operate view. -->
+        <div class="estop-row">
+          <button type="button" class="btn-estop" disabled={estopRunning} onclick={triggerEstop}>
+            {estopRunning
+              ? "ENGAGING…"
+              : workbenchConfig?.runtime_url_override
+                ? "Software stop: configured runtime URL"
+                : `Software stop: ${runningProject}`}
+          </button>
+        </div>
+        <div class="estop-disclaimer">
+          Not an emergency stop. For any physical hazard use the hardware emergency stop.
+        </div>
+        {#if estopFeedback && estopFeedbackFor === runningProject}
+          <div class={estopFeedbackClass}>{estopFeedback}</div>
+        {/if}
       {:else}
         Runtime is not running for this project.
       {/if}
