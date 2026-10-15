@@ -26,6 +26,7 @@ import {
   RUNTIME_MODES,
   SOFTWARE_SAFE_STATES,
   summarizeEstopResponse,
+  versionAtLeast,
 } from "../../src/lib/operate-contracts";
 
 type FakeTreeNode = {
@@ -159,6 +160,7 @@ describe("operate-contracts extractors", () => {
 
     expect(extractRuntimeStatus({})).toEqual({
       status: {},
+      version: "",
       mode: "UNKNOWN",
       uptime_seconds: 0,
       polling_interval_ms: 0,
@@ -616,5 +618,30 @@ describe("normalizeFunctionSpecs", () => {
       "1:Z",
       "2:B",
     ]);
+  });
+});
+
+describe("versionAtLeast", () => {
+  it.each([
+    ["0.1.45", true],
+    ["0.1.46", true],
+    ["0.2.0", true],
+    ["1.0.0", true],
+    ["v0.1.45", true],
+    ["0.1.45+build.7", true],
+    ["0.1.44", false],
+    ["0.1.9", false],
+    ["0.0.99", false],
+    ["0.1.45-rc.1", false],
+    ["", false],
+    ["dev-build", false],
+    ["0.1", false],
+  ])("%s against 0.1.45 is %s", (version, expected) => {
+    expect(versionAtLeast(version, "0.1.45")).toBe(expected);
+  });
+
+  it("treats a missing version as old", () => {
+    expect(versionAtLeast(undefined, "0.1.45")).toBe(false);
+    expect(versionAtLeast(null, "0.1.45")).toBe(false);
   });
 });

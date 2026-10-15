@@ -376,7 +376,7 @@
       <Commission {projectName} {system} {runtimeStatus} {commissionRunningForCurrent} />
     {/key}
   {:else if workspace === "operate"}
-    <Operate {projectName} {runtimeStatus} />
+    <Operate {projectName} {system} {runtimeStatus} />
   {/if}
 </main>
 

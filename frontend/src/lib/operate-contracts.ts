@@ -167,6 +167,7 @@ export function extractRuntimeStatus(payload: unknown): RuntimeApiStatus {
   const r = asObject(payload);
   return {
     status: asObject(r.status) as RuntimeApiStatus["status"],
+    version: typeof r.version === "string" ? r.version : "",
     mode: typeof r.mode === "string" ? r.mode : "UNKNOWN",
     uptime_seconds: toFinite(r.uptime_seconds) ?? 0,
     polling_interval_ms: toFinite(r.polling_interval_ms) ?? 0,
@@ -241,6 +242,32 @@ export function normalizeProviderHealthQuality(
  * the vendored runtime-http OpenAPI contract. A unit test guards against drift.
  */
 export const SOFTWARE_SAFE_STATES = ["none", "hooks", "setpoints", "zero"] as const;
+
+/**
+ * The first runtime whose `uncovered_actuating_functions` counts the
+ * actuating functions the active rung will not drive (anolishq/anolis#253,
+ * anolishq/anolis PR #369). Before it, the field counts functions with no
+ * matching setpoint, which overstates under hooks and is false under zero.
+ */
+export const DISPATCHABLE_COVERAGE_SINCE = "0.1.45";
+
+const SEMVER = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+
+/**
+ * Whether `version` is at least `min` (a release `X.Y.Z`) by semver
+ * precedence. A pre-release of `min` is older than `min`. An unknown or
+ * unparsable version is never at least anything.
+ */
+export function versionAtLeast(version: string | null | undefined, min: string): boolean {
+  const v = SEMVER.exec((version ?? "").trim());
+  const m = SEMVER.exec(min);
+  if (!v || !m) return false;
+  for (let i = 1; i <= 3; i += 1) {
+    const diff = Number(v[i]) - Number(m[i]);
+    if (diff !== 0) return diff > 0;
+  }
+  return v[4] === undefined;
+}
 
 /**
  * Normalize a software-safe-state value. An unrecognized value degrades to the

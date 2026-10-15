@@ -132,6 +132,35 @@ export interface RuntimeAutomation extends UnknownRecord {
   behavior_tree?: string;
 }
 
+/** One device call in a safe-state hook or setpoint list. */
+export interface RuntimeSafeStateCall extends UnknownRecord {
+  device_handle: string;
+  function_id?: number;
+  function_name?: string;
+  args?: Record<string, string | number | boolean>;
+}
+
+/**
+ * The software safe-state `POST /v0/estop` runs. Ladder: hooks; else
+ * setpoints (must cover every actuating output); else zero all actuating
+ * outputs only if `zero_is_safe`.
+ */
+export interface RuntimeSafety extends UnknownRecord {
+  safe_state?: {
+    hooks?: RuntimeSafeStateCall[];
+    setpoints?: RuntimeSafeStateCall[];
+    zero_is_safe?: boolean;
+  } & UnknownRecord;
+}
+
+/** Liveness thresholds; 0 (default) derives each from the poll cadence. */
+export interface RuntimeHealth extends UnknownRecord {
+  staleness?: {
+    warn_after_ms?: number;
+    stale_after_ms?: number;
+  } & UnknownRecord;
+}
+
 /**
  * A runtime-config document — the file the runtime itself consumes
  * (`config/anolis-runtime.<variant>.yaml`). The workbench edits it directly
@@ -149,6 +178,8 @@ export interface RuntimeConfigDoc extends UnknownRecord {
   telemetry?: RuntimeTelemetry;
   logging?: { level?: string } & UnknownRecord;
   automation?: RuntimeAutomation;
+  safety?: RuntimeSafety;
+  health?: RuntimeHealth;
 }
 
 export interface ComponentPin extends UnknownRecord {
@@ -233,6 +264,8 @@ export interface RuntimeStatusProvider {
 
 export interface RuntimeApiStatus extends UnknownRecord {
   status: RuntimeStatusCode;
+  /** Runtime version string; "" when the runtime did not report one. */
+  version: string;
   mode: string;
   uptime_seconds: number;
   polling_interval_ms: number;
