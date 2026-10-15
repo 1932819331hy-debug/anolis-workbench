@@ -72,3 +72,28 @@ def test_error_event_carries_the_preflight_block(calls, monkeypatch: pytest.Monk
     assert event["stage"] == "error"
     assert event["host_preflight"] == block
     assert event["reboot_pending"] is False
+
+
+def test_remote_job_deploys_the_named_project_with_its_variant(calls, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Commission's Deploy to device posts project, variant and target (#275)."""
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        calls.append(kwargs)
+        return deploy.DeployResult(project_name="rig", runtime_version="0.1.43", prefix="/opt/anolis", output="")
+
+    class _Executor:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(deploy, "deploy_remote", _deploy)
+    monkeypatch.setattr(provision, "ParamikoSSHExecutor", _Executor)
+    monkeypatch.setattr("anolis_workbench.core.fleet.auto_register_host", lambda **kwargs: None)
+    job = provision.ProvisionJob(job_id="j3")
+    provision._run_remote_job(job, {"project": "rig", "variant": "automation", "target": "pi@rig"})
+
+    assert job.status == "done"
+    assert calls[0]["project_name"] == "rig"
+    assert calls[0]["variant"] == "automation"

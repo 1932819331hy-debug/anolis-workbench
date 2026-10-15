@@ -301,6 +301,16 @@ def test_deploy_remote_pushes_config_and_runs(project_dir: pathlib.Path, monkeyp
     ]
 
 
+def test_deploy_passes_the_chosen_variant_to_install_sh(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_fetch(monkeypatch)
+    executor = RecordingExecutor()
+    deploy.deploy_remote(executor=executor, project_dir=project_dir, project_name="deploy-fixture", variant="manual")
+    cmd = executor.commands[-1]["cmd"]
+    assert cmd[cmd.index("--variant") + 1] == "manual"
+
+
 # ---------------------------------------------------------------------------
 # run_rollback
 # ---------------------------------------------------------------------------

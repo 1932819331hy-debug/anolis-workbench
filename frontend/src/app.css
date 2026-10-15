@@ -1315,6 +1315,36 @@ body {
   gap: 12px;
 }
 
+.commission-deploy {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.commission-deploy h3 {
+  margin: 0;
+}
+
+.deploy-target {
+  display: flex;
+  gap: 16px;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+
+.deploy-output {
+  white-space: pre-wrap;
+  overflow-x: auto;
+  font-size: 12px;
+}
+
 /* ─── Preflight check details ───────────────────────────────────────────── */
 
 .check-name {

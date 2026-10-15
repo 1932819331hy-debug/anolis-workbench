@@ -315,3 +315,161 @@ describe('Commission.svelte', () => {
     });
   });
 });
+
+describe('Commission.svelte — Deploy to device (#275)', () => {
+  class DrivenEventSource {
+    static instances: DrivenEventSource[] = [];
+    url: string;
+    closed = false;
+    onmessage: ((event: MessageEvent<string>) => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    constructor(url: string) {
+      this.url = url;
+      DrivenEventSource.instances.push(this);
+    }
+    emit(data: unknown): void {
+      this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(data) }));
+    }
+    close(): void {
+      this.closed = true;
+    }
+  }
+
+  function setup() {
+    DrivenEventSource.instances = [];
+    vi.stubGlobal('EventSource', DrivenEventSource as unknown as typeof EventSource);
+    const posts: { path: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = pathFromInput(input);
+        if (path.startsWith('/api/provision/')) {
+          posts.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
+          return jsonResponse(202, { job_id: 'job-1' });
+        }
+        return jsonResponse(200, {});
+      }),
+    );
+    const doc = createProjectDocument('demo');
+    doc.profile.runtime_profiles.automation = 'config/anolis-runtime.automation.yaml';
+    doc.variants.automation = {
+      ...doc.variants.manual,
+      automation: { enabled: true, behavior_tree: 'behaviors/main.xml' },
+    };
+    render(Commission, {
+      props: {
+        projectName: 'demo',
+        system: doc,
+        runtimeStatus: createRuntimeStatus(),
+        commissionRunningForCurrent: false,
+      },
+    });
+    return { posts };
+  }
+
+  it('deploys the selected project to a remote device with the chosen variant', async () => {
+    const { posts } = setup();
+
+    const variant = screen.getByLabelText('Runtime variant') as HTMLSelectElement;
+    expect(variant.value).toBe('manual');
+    expect(screen.getByRole('button', { name: 'Deploy' })).toBeDisabled();
+
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), {
+      target: { value: 'pi@rig' },
+    });
+    await fireEvent.change(variant, { target: { value: 'automation' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+    expect(posts).toEqual([
+      {
+        path: '/api/provision/remote',
+        body: { project: 'demo', variant: 'automation', target: 'pi@rig' },
+      },
+    ]);
+    const source = DrivenEventSource.instances[0];
+    expect(source.url).toBe('/api/provision/status/job-1');
+
+    source.emit({
+      stage: 'existing-config',
+      detail: '/opt/anolis/config/runtime.yaml exists on the target and is kept',
+    });
+    expect(await screen.findByText(/runtime\.yaml exists on the target and is kept/)).toBeInTheDocument();
+
+    source.emit({
+      stage: 'done',
+      summary: {
+        runtime_version: '0.1.43',
+        host_preflight: [],
+        reboot_pending: false,
+        preserved: ["⚠ config (runtime): --variant 'automation' NOT applied; /opt/anolis/config/runtime.yaml is preserved."],
+        runtime_config_kept: true,
+      },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(screen.getByText(/existing runtime config was kept; the runtime runs it/)).toBeInTheDocument();
+    expect(screen.getByText(/--variant 'automation' NOT applied/)).toBeInTheDocument();
+    expect(source.closed).toBe(true);
+  });
+
+  it('deploys to this machine through the local install job', async () => {
+    const { posts } = setup();
+
+    await fireEvent.click(screen.getByLabelText('This machine'));
+    expect(screen.queryByLabelText('Target (user@host)')).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+
+    await waitFor(() => expect(posts.length).toBe(1));
+    expect(posts[0]).toEqual({
+      path: '/api/provision/install',
+      body: { project: 'demo', variant: 'manual' },
+    });
+
+    DrivenEventSource.instances[0].emit({
+      stage: 'error',
+      detail: 'install.sh failed (exit 1):\n✗ verify: checksum mismatch for anolis-runtime',
+      host_preflight: [],
+      reboot_pending: false,
+    });
+    expect(await screen.findByText('Deploy failed')).toBeInTheDocument();
+    expect(screen.getByText(/checksum mismatch/)).toBeInTheDocument();
+  });
+
+  it('does not call a freshly written runtime config kept after a variant switch', async () => {
+    setup();
+    await fireEvent.click(screen.getByLabelText('This machine'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+
+    // install.sh after "remove runtime.yaml and re-run": runtime.yaml was
+    // written fresh, the provider configs were kept.
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: {
+        runtime_version: '0.1.43',
+        preserved: ['→ config (providers): 2 preserved, 0 written'],
+        runtime_config_kept: false,
+      },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(screen.queryByText(/runtime config was kept/)).not.toBeInTheDocument();
+    expect(screen.getByText(/left these existing configs in place/)).toBeInTheDocument();
+    expect(screen.getByText(/2 preserved, 0 written/)).toBeInTheDocument();
+  });
+
+  it('marks a variant that does not boot inert, and says unsaved edits are not deployed', () => {
+    setup();
+    expect(screen.getByRole('option', { name: 'manual' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('option', { name: 'automation (fresh install refuses this)' }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Deploys the saved project; unsaved edits are not included/)).toBeInTheDocument();
+  });
+
+  it('says before deploying that an existing runtime config is kept', () => {
+    setup();
+    expect(
+      screen.getByText(/already has a runtime config, install\.sh keeps that config/),
+    ).toBeInTheDocument();
+  });
+});

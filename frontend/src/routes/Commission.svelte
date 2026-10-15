@@ -15,7 +15,7 @@
     type RuntimeApiStatus,
     type RuntimeStatus,
   } from "../lib/contracts";
-  import { activeVariant } from "../lib/canonical";
+  import { activeVariant, inertnessViolation, MANUAL_VARIANT } from "../lib/canonical";
 
   let {
     projectName,
@@ -35,7 +35,8 @@
   // Every project declares runtime variants now (#255). The bundle carries ALL
   // of them: install.sh's bundle assembly always stages the inert `manual`
   // variant and ignores --variant, so the choice is made at install time on the
-  // target. Offering a picker here would claim otherwise (see wb#275).
+  // target. Offering a picker here would claim otherwise; Deploy to device
+  // below is where a variant is chosen (#275).
   const variants = $derived(Object.keys(system?.profile?.runtime_profiles ?? {}).sort());
 
   /** The HTTP port dev-launch serves on, from the variant it will run. */
@@ -87,6 +88,47 @@
   // The two architectures release assets exist for. The default is the Pi
   // target, labelled as such, with the alternative always visible (#338).
   let bundleArch = $state<"arm64" | "x86_64">("arm64");
+
+  // ── Deploy to device (#275) ──────────────────────────────────────────────
+  type DeployEvent = {
+    stage: string;
+    detail?: string;
+    status?: string;
+    error?: string | null;
+    summary?: {
+      runtime_version?: string;
+      host_preflight?: string[];
+      reboot_pending?: boolean;
+      preserved?: string[];
+      runtime_config_kept?: boolean;
+    };
+    host_preflight?: string[];
+    reboot_pending?: boolean;
+  };
+  type DeployOutcome = {
+    ok: boolean;
+    runtimeVersion: string;
+    error: string;
+    hostPreflight: string[];
+    rebootPending: boolean;
+    preserved: string[];
+    runtimeConfigKept: boolean;
+  };
+  let deployTarget = $state<"local" | "remote">("remote");
+  let deployHost = $state<string>("");
+  let deployVariantChoice = $state<string>("");
+  let deployRunning = $state<boolean>(false);
+  let deployProgress = $state<string[]>([]);
+  let deployOutcome = $state<DeployOutcome | null>(null);
+  let deployError = $state<string>("");
+  // The project's own variants; `manual` until the user picks another.
+  const deployVariant = $derived(
+    variants.includes(deployVariantChoice)
+      ? deployVariantChoice
+      : variants.includes(MANUAL_VARIANT)
+        ? MANUAL_VARIANT
+        : (variants[0] ?? ""),
+  );
 
   let commissionLiveDataActive = false;
 
@@ -387,6 +429,89 @@
     }
   }
 
+  // ── Deploy to device ──────────────────────────────────────────────────────
+  function outcomeOf(data: DeployEvent): DeployOutcome | null {
+    if (data.stage === "done") {
+      return {
+        ok: true,
+        runtimeVersion: data.summary?.runtime_version ?? "",
+        error: "",
+        hostPreflight: data.summary?.host_preflight ?? [],
+        rebootPending: data.summary?.reboot_pending ?? false,
+        preserved: data.summary?.preserved ?? [],
+        runtimeConfigKept: data.summary?.runtime_config_kept === true,
+      };
+    }
+    if (data.stage === "error" || data.stage === "status") {
+      return {
+        ok: data.stage === "status" && data.status === "done",
+        runtimeVersion: "",
+        error: data.detail ?? data.error ?? `Deploy ${data.status ?? "failed"}`,
+        hostPreflight: data.host_preflight ?? [],
+        rebootPending: data.reboot_pending ?? false,
+        preserved: [],
+        runtimeConfigKept: false,
+      };
+    }
+    return null;
+  }
+
+  async function doDeploy() {
+    if (!projectName) return;
+    const host = deployHost.trim();
+    if (deployTarget === "remote" && !host.includes("@")) {
+      deployError = "Enter the target as user@host";
+      return;
+    }
+    deployRunning = true;
+    deployError = "";
+    deployProgress = [];
+    deployOutcome = null;
+    const body: Record<string, unknown> = { project: projectName };
+    if (deployVariant) body.variant = deployVariant;
+    if (deployTarget === "remote") body.target = host;
+    try {
+      const started = await fetchJson<{ job_id: string }>(
+        deployTarget === "remote" ? "/api/provision/remote" : "/api/provision/install",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
+      deployOutcome = await new Promise<DeployOutcome>((resolve) => {
+        const source = new EventSource(`/api/provision/status/${started.job_id}`);
+        source.onmessage = (ev: MessageEvent<string>) => {
+          const data = JSON.parse(ev.data) as DeployEvent;
+          const outcome = outcomeOf(data);
+          if (outcome) {
+            source.close();
+            resolve(outcome);
+          } else {
+            deployProgress = [...deployProgress, data.detail || data.stage];
+          }
+        };
+        source.onerror = () => {
+          source.close();
+          resolve({
+            ok: false,
+            runtimeVersion: "",
+            error:
+              "Lost the connection to the workbench while deploying. The install may still be running on the target.",
+            hostPreflight: [],
+            rebootPending: false,
+            preserved: [],
+            runtimeConfigKept: false,
+          });
+        };
+      });
+    } catch (err) {
+      deployError = `Deploy failed to start: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      deployRunning = false;
+    }
+  }
+
   // ── Bundle Export ─────────────────────────────────────────────────────────
   async function doExportBundle() {
     if (!projectName) return;
@@ -451,6 +576,37 @@
   }
 </script>
 
+{#snippet deployResult(outcome: DeployOutcome)}
+  <div id="deploy-result">
+    {#if outcome.ok}
+      <strong>Deployed</strong>
+      {#if outcome.runtimeVersion}
+        <p>anolis-runtime v{outcome.runtimeVersion} is installed.</p>
+      {/if}
+      {#if outcome.runtimeConfigKept}
+        <p>The existing runtime config was kept; the runtime runs it, not this project's.</p>
+      {/if}
+      {#if outcome.preserved.length}
+        <p>install.sh left these existing configs in place:</p>
+        <pre class="deploy-output">{outcome.preserved.join("\n")}</pre>
+      {/if}
+      {#if outcome.hostPreflight.length}
+        <p>The host preflight needs attention:</p>
+        <pre class="deploy-output">{outcome.hostPreflight.join("\n")}</pre>
+      {/if}
+    {:else}
+      <strong>Deploy failed</strong>
+      <pre class="deploy-output">{outcome.error}</pre>
+    {/if}
+    {#if outcome.rebootPending}
+      <p>
+        A reboot is pending on the target (/run/reboot-required). Reboot it before relying on its
+        hardware.
+      </p>
+    {/if}
+  </div>
+{/snippet}
+
 <section id="workspace-commission" class="workspace visible">
   <div class="workspace-header">
     <h2>Commission</h2>
@@ -469,7 +625,7 @@
     {#if imported}
       <div class="workspace-advisory">
         Imported machine profile — carried verbatim; dev-launch and preflight are not available.
-        Deploy it with install.sh (Export Bundle below, or the provision CLI).
+        Deploy it with install.sh (Deploy to device or Export Bundle below, or the provision CLI).
       </div>
     {:else if !commissionRunningForCurrent}
       <!-- Idle: preflight + launch -->
@@ -666,6 +822,75 @@
       {/if}
     </div>
   {/if}
+
+  <!-- Deploy to device: install.sh --project, here or over SSH (#275) -->
+  <div id="deploy-panel" class="commission-deploy">
+    <h3>Deploy to device</h3>
+    <fieldset class="deploy-target" disabled={deployRunning}>
+      <legend>Target</legend>
+      <label>
+        <input type="radio" name="deploy-target" value="remote" bind:group={deployTarget} />
+        A remote device over SSH
+      </label>
+      <label>
+        <input type="radio" name="deploy-target" value="local" bind:group={deployTarget} />
+        This machine
+      </label>
+    </fieldset>
+    {#if deployTarget === "remote"}
+      <label for="deploy-host">Target (user@host)</label>
+      <input
+        id="deploy-host"
+        type="text"
+        placeholder="pi@192.168.1.10"
+        autocomplete="off"
+        spellcheck="false"
+        disabled={deployRunning}
+        bind:value={deployHost}
+      />
+    {/if}
+    <label for="deploy-variant">Runtime variant</label>
+    <select
+      id="deploy-variant"
+      value={deployVariant}
+      disabled={deployRunning}
+      onchange={(e) => (deployVariantChoice = e.currentTarget.value)}
+    >
+      {#each variants as v (v)}
+        <option value={v}>
+          {inertnessViolation(system?.variants?.[v]) ? `${v} (fresh install refuses this)` : v}
+        </option>
+      {/each}
+    </select>
+    <p class="field-note">Deploys the saved project; unsaved edits are not included.</p>
+    <p class="field-note">
+      A fresh install accepts only a variant that boots inert. On a device that already has a
+      runtime config, install.sh keeps that config: this project's runtime config and the variant
+      are not applied over it.
+    </p>
+    <button
+      type="button"
+      class="btn-primary"
+      id="btn-deploy"
+      disabled={deployRunning || (deployTarget === "remote" && !deployHost.trim())}
+      onclick={doDeploy}
+    >
+      {deployRunning ? "Deploying…" : "Deploy"}
+    </button>
+    {#if deployError}
+      <p class="field-error">{deployError}</p>
+    {/if}
+    {#if deployProgress.length}
+      <ol class="deploy-stages" aria-live="polite">
+        {#each deployProgress as step, i (i)}
+          <li>{step}</li>
+        {/each}
+      </ol>
+    {/if}
+    {#if deployOutcome}
+      {@render deployResult(deployOutcome)}
+    {/if}
+  </div>
 
   <!-- Export bundle (offline install package) -->
   <div class="commission-export">

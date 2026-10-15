@@ -93,11 +93,15 @@ describe("Commission.svelte (imported project)", () => {
     expect(screen.queryByRole("button", { name: /Export \.anpkg/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Export Bundle/ })).toBeInTheDocument();
 
-    // No variant picker: install.sh's bundle assembly always stages `manual`
-    // and ignores --variant, so a picker here would claim a choice the bundle
-    // does not carry. The variants ARE all in the bundle; the target chooses.
-    // The only picker is the bundle's target architecture (#338).
-    expect(screen.getAllByRole("combobox").map((el) => el.id)).toEqual(["bundle-arch"]);
+    // No bundle variant picker: install.sh's bundle assembly always stages
+    // `manual` and ignores --variant, so a picker there would claim a choice
+    // the bundle does not carry. The variants ARE all in the bundle; the
+    // target chooses. The variant picker belongs to Deploy to device (#275);
+    // the bundle's only picker is its target architecture (#338).
+    expect(screen.getAllByRole("combobox").map((el) => el.id)).toEqual([
+      "deploy-variant",
+      "bundle-arch",
+    ]);
     expect(screen.getByText(/Carries every runtime variant/)).toHaveTextContent("automation");
     expect(screen.getByText(/install\.sh --variant/)).toBeInTheDocument();
   });
