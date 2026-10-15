@@ -1,0 +1,18 @@
+[0;33m⚠ observability: vendor apt repos unreachable (offline?) — skipped[0m
+    The runtime install is unaffected; re-run with --with-observability once online.
+[0;32m✓ health: runtime responding (v0.1.45)[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Anolis installation complete
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Prefix:   /opt/anolis
+  Profile:  manual
+  Port:     8080
+  Grafana bind unchanged: the observability step did not finish (see the warnings above)
+  InfluxDB:  http://127.0.0.1:8086 (org anolis, bucket anolis, retention 30d)
+  Hostname: rig
+  Access:   http://rig.local:8080
+  API token: /etc/anolis/runtime.env (read it with: sudo cat /etc/anolis/runtime.env)
+             Remote clients must send it as: Authorization: Bearer <token>
+             Requests from the device itself are exempt.
+

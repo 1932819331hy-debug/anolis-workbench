@@ -87,6 +87,8 @@ python3 scripts/sync-upstream-schema-from-release.py --schema provider-config-<k
 
 # Verify: each anolis lock by name, the provider locks all at once
 python3 scripts/verify-upstream-schema.py --schema runtime-config --require-release-artifact
+python3 scripts/verify-upstream-schema.py --schema machine-profile --require-release-artifact
+python3 scripts/verify-upstream-schema.py --schema runtime-http --require-release-artifact
 python3 scripts/verify-upstream-schema.py --all-providers --require-release-artifact
 ```
 

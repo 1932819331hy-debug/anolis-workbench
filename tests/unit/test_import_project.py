@@ -132,6 +132,32 @@ def test_import_warns_on_non_inert_manual_variant(systems_root: pathlib.Path, so
     assert any("verify-inert" in w for w in warnings), warnings
 
 
+def test_import_warns_on_an_influxdb_token(systems_root: pathlib.Path, source_dir: pathlib.Path) -> None:
+    """Deploy refuses an authored token (#463); say so at import, not only then."""
+    rel = "config/anolis-runtime.bioreactor.telemetry.yaml"
+    variant = source_dir / rel
+    variant.write_text(
+        variant.read_text(encoding="utf-8").replace("    org: anolis\n", "    org: anolis\n    token: abc\n"),
+        encoding="utf-8",
+    )
+    _, warnings = projects.import_project(str(source_dir), "rig-a")
+    token_warnings = [w for w in warnings if "telemetry.influxdb.token" in w]
+    assert len(token_warnings) == 1, warnings
+    assert token_warnings[0].startswith(f"Runtime variant 'telemetry' ({rel}): ")
+    assert "INFLUXDB_TOKEN" in token_warnings[0]
+    assert "re-import" in token_warnings[0]
+
+
+def test_import_accepts_an_empty_influxdb_token(systems_root: pathlib.Path, source_dir: pathlib.Path) -> None:
+    variant = source_dir / "config" / "anolis-runtime.bioreactor.telemetry.yaml"
+    variant.write_text(
+        variant.read_text(encoding="utf-8").replace("    org: anolis\n", '    org: anolis\n    token: ""\n'),
+        encoding="utf-8",
+    )
+    _, warnings = projects.import_project(str(source_dir), "rig-a")
+    assert warnings == []
+
+
 def test_skew_on_an_imported_rig_is_derived_and_never_recorded(
     systems_root: pathlib.Path, source_dir: pathlib.Path
 ) -> None:

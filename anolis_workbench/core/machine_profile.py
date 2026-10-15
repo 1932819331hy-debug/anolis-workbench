@@ -302,6 +302,8 @@ def validate_project_dir(source_dir: Path, profile_dir_name: str) -> ImportRepor
         report.warnings.append("No 'manual' runtime profile — install.sh boot-inert deploys need one.")
     else:
         report.warnings.extend(_manual_inertness_warnings(source_dir / manual_ref, manual_ref))
+    if isinstance(runtime_profiles, dict):
+        report.warnings.extend(_influx_token_warnings(source_dir, runtime_profiles))
 
     kinds = derive_kinds(profile, source_dir)
     for pid, kind in kinds.items():
@@ -330,6 +332,28 @@ def validate_project_dir(source_dir: Path, profile_dir_name: str) -> ImportRepor
 
     report.warnings.extend(_project_path_warnings(source_dir, profile, profile_dir_name))
     return report
+
+
+def _influx_token_warnings(source_dir: Path, runtime_profiles: dict) -> list[str]:
+    """Deploy refuses a runtime variant that carries telemetry.influxdb.token,
+    and an import is carried verbatim, so the fix is in the source."""
+    from anolis_workbench.core import canonical  # local: canonical imports this module
+
+    warnings: list[str] = []
+    for variant, rel in sorted(runtime_profiles.items()):
+        if not isinstance(rel, str):
+            continue
+        try:
+            doc = yaml.safe_load((source_dir / rel).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            continue
+        problem = canonical.influx_token_error(doc)
+        if problem is not None:
+            warnings.append(
+                f"Runtime variant '{variant}' ({rel}): {problem} Deploy refuses this project until the token is "
+                "removed: edit the source and re-import."
+            )
+    return warnings
 
 
 def _manual_inertness_warnings(path: Path, ref: str) -> list[str]:

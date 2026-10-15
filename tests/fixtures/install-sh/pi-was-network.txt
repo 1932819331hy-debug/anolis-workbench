@@ -1,0 +1,20 @@
+[0;32m✓ observability: influxdb bootstrapped (org anolis, bucket anolis, retention 30d)[0m
+[0;32m✓ observability: influxdb (:8086) and grafana (:3000) up[0m
+[0;32m✓ health: runtime responding (v0.1.45)[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Anolis installation complete
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Prefix:   /opt/anolis
+  Profile:  manual
+  Port:     8080
+  Grafana:   now bound to 127.0.0.1 — no longer on the network (re-run with --with-grafana-network to open it)
+  Grafana:   127.0.0.1:3000 on this machine (admin password: /etc/anolis/observability.env)
+    from another machine: ssh -L 3000:127.0.0.1:3000 pi@rig.local, then http://localhost:3000
+  InfluxDB:  http://127.0.0.1:8086 (org anolis, bucket anolis, retention 30d)
+  Hostname: rig
+  Access:   http://rig.local:8080
+  API token: /etc/anolis/runtime.env (read it with: sudo cat /etc/anolis/runtime.env)
+             Remote clients must send it as: Authorization: Bearer <token>
+             Requests from the device itself are exempt.
+

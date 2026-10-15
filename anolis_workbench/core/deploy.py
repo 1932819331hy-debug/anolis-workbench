@@ -402,14 +402,18 @@ def host_preflight_block(stdout: str) -> list[str]:
     return block
 
 
-_OBSERVABILITY_MARKS = ("observability:", "Grafana:")
+_OBSERVABILITY_MARKS = ("observability:", "Grafana:", "Grafana bind unchanged", "InfluxDB:")
+# install.sh's log_info indents every line by two spaces, so a summary line
+# such as "  Hostname:" starts with spaces too. Its detail lines (a log_info
+# message that itself starts with two spaces) start with four.
+_DETAIL_INDENT = "    "
 
 
 def observability_lines(stdout: str) -> list[str]:
-    """install.sh's observability and Grafana lines, ANSI stripped, each with
-    the indented detail that follows it. install.sh reports every
-    observability failure as a warning and still exits 0, so these lines
-    are the only place a failure shows."""
+    """install.sh's observability, Grafana and InfluxDB lines, ANSI
+    stripped, each with the indented detail that follows it. install.sh
+    reports every observability failure as a warning and still exits 0, so
+    these lines are the only place a failure shows."""
     lines = _ANSI_RE.sub("", stdout).splitlines()
     out: list[str] = []
     in_block = False
@@ -417,7 +421,7 @@ def observability_lines(stdout: str) -> list[str]:
         if any(mark in line for mark in _OBSERVABILITY_MARKS):
             out.append(line)
             in_block = True
-        elif in_block and line.startswith(" ") and line.strip():
+        elif in_block and line.startswith(_DETAIL_INDENT) and line.strip():
             out.append(line)
         else:
             in_block = False

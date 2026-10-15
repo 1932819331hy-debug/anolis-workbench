@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
 import sys
 
 import pytest
@@ -131,12 +132,10 @@ class TestObservabilityFlag:
 
     # install.sh's observability phase reports every failure as a warning
     # and still exits 0, so its lines are the only signal the CLI gets.
-    _OFFLINE = (
-        "\x1b[32m✓ runtime installed\x1b[0m\n"
-        "\x1b[33m⚠ observability: vendor apt repos unreachable (offline?) — skipped\x1b[0m\n"
-        "  The runtime install is unaffected; re-run with --with-observability once online.\n"
-        "✓ health: runtime answering\n"
-    )
+    # Both are install.sh's own output (see tests/unit/test_deploy.py).
+    _FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures" / "install-sh"
+    _OFFLINE = (_FIXTURES / "offline.txt").read_text(encoding="utf-8")
+    _PI_LOOPBACK = (_FIXTURES / "pi-loopback.txt").read_text(encoding="utf-8")
 
     def _run_install_with_output(self, tmp_path, monkeypatch: pytest.MonkeyPatch, output: str, *flags: str) -> int:
         from anolis_workbench.cli import provision_cli
@@ -153,19 +152,14 @@ class TestObservabilityFlag:
         out, err = capsys.readouterr()
         assert "⚠ observability: vendor apt repos unreachable (offline?) — skipped" in out
         assert "re-run with --with-observability once online" in out
-        assert "health: runtime answering" not in out
+        assert "Grafana bind unchanged" in out
+        assert "Hostname:" not in out
         assert "WARNING" in err and "observability" in err
 
     def test_remote_surfaces_the_grafana_lines(self, tmp_path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
         from anolis_workbench.cli import provision_cli
         from anolis_workbench.core import deploy
         from anolis_workbench.core import executor as executor_module
-
-        output = (
-            "✓ observability: influxdb bootstrapped\n"
-            "✓ Grafana: http://localhost:3000\n"
-            "  ssh -L 3000:127.0.0.1:3000 pi@host\n"
-        )
 
         class _FakeSSH:
             def __init__(self, **kwargs: object) -> None:
@@ -174,15 +168,18 @@ class TestObservabilityFlag:
             def run(self, cmd: list[str], **kwargs: object) -> executor_module.RunResult:
                 return executor_module.RunResult(returncode=0, stdout="x86_64\n", stderr="")
 
-        result = deploy.DeployResult(project_name="p", runtime_version="0.1.45", prefix="/opt/anolis", output=output)
+        result = deploy.DeployResult(
+            project_name="p", runtime_version="0.1.45", prefix="/opt/anolis", output=self._PI_LOOPBACK
+        )
         monkeypatch.setattr(executor_module, "SubprocessSSHExecutor", _FakeSSH)
         monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
         monkeypatch.setattr(provision_cli.deploy, "deploy_remote", lambda **kwargs: result)
         monkeypatch.setattr(sys, "argv", ["anolis-provision", "remote", "--target", "pi@host", "--with-observability"])
         assert provision_cli._run_remote(provision_cli._parse_args()) == 0
         out, err = capsys.readouterr()
-        assert "Grafana: http://localhost:3000" in out
-        assert "ssh -L 3000:127.0.0.1:3000 pi@host" in out
+        assert "Grafana:   127.0.0.1:3000 on this machine" in out
+        assert "ssh -L 3000:127.0.0.1:3000 pi@rig.local" in out
+        assert "API token:" not in out
         assert "WARNING" not in err
 
     def test_install_shows_a_tail_when_install_sh_printed_no_observability_lines(

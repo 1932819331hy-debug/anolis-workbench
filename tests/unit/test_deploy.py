@@ -825,3 +825,47 @@ def test_the_notice_names_no_variant_when_none_was_chosen(
     )
     notice = next(detail for step, detail in seen if step == "existing-config")
     assert notice.endswith("this project's runtime config.")
+
+
+# install.sh's own output, captured from anolis tools/install.sh by sourcing
+# it with ANOLIS_INSTALL_SH_NO_MAIN=1 and running phase_summary (and, for
+# `offline`, phase_observability with its vendor-repo probe failing). Colour
+# codes are kept as install.sh prints them.
+_INSTALL_SH_FIXTURES = pathlib.Path(__file__).parent.parent / "fixtures" / "install-sh"
+
+
+def _install_sh_output(name: str) -> str:
+    return (_INSTALL_SH_FIXTURES / f"{name}.txt").read_text(encoding="utf-8")
+
+
+def test_observability_lines_skip_the_rest_of_the_summary() -> None:
+    assert deploy.observability_lines(_install_sh_output("pi-loopback")) == [
+        "✓ observability: influxdb bootstrapped (org anolis, bucket anolis, retention 30d)",
+        "✓ observability: influxdb (:8086) and grafana (:3000) up",
+        "  Grafana:   127.0.0.1:3000 on this machine (admin password: /etc/anolis/observability.env)",
+        "    from another machine: ssh -L 3000:127.0.0.1:3000 pi@rig.local, then http://localhost:3000",
+        "  InfluxDB:  http://127.0.0.1:8086 (org anolis, bucket anolis, retention 30d)",
+    ]
+
+
+def test_observability_lines_show_grafana_on_the_network() -> None:
+    lines = deploy.observability_lines(_install_sh_output("pi-network"))
+    assert lines[2:] == [
+        "  Grafana:   http://rig.local:3000 (admin password: /etc/anolis/observability.env)",
+        "  InfluxDB:  http://127.0.0.1:8086 (org anolis, bucket anolis, retention 30d)",
+    ]
+
+
+def test_observability_lines_say_grafana_left_the_network() -> None:
+    lines = deploy.observability_lines(_install_sh_output("pi-was-network"))
+    assert lines[2].startswith("  Grafana:   now bound to 127.0.0.1")
+    assert lines[3].startswith("  Grafana:   127.0.0.1:3000 on this machine")
+
+
+def test_observability_lines_show_the_bind_unchanged_line() -> None:
+    assert deploy.observability_lines(_install_sh_output("offline")) == [
+        "⚠ observability: vendor apt repos unreachable (offline?) — skipped",
+        "    The runtime install is unaffected; re-run with --with-observability once online.",
+        "  Grafana bind unchanged: the observability step did not finish (see the warnings above)",
+        "  InfluxDB:  http://127.0.0.1:8086 (org anolis, bucket anolis, retention 30d)",
+    ]
