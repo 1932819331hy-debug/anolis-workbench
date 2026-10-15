@@ -242,7 +242,7 @@ export interface RuntimeApiStatus extends UnknownRecord {
 
 /**
  * Which rung of the safe-state ladder a `POST /v0/estop` would run now.
- * "none" = no software safe-state declared (hardware backplane cut only).
+ * "none" = no software safe-state declared (hardware cut only).
  * MUST stay in sync with the `SoftwareSafeState` enum in the vendored
  * runtime-http OpenAPI contract — a unit test guards against drift.
  */

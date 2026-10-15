@@ -826,7 +826,7 @@
       <div class="estop-disclaimer">
         Not an emergency stop — it commands devices that stay powered, and needs the runtime,
         providers and bus all working. For any physical hazard use the hardware emergency stop. If
-        in doubt, cut power at the backplane.
+        in doubt, isolate power to the machine.
       </div>
     </div>
 
