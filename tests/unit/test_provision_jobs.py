@@ -85,6 +85,42 @@ def test_local_done_event_has_no_grafana_access_without_observability(calls, mon
     assert job.events[-1]["summary"]["grafana_access"] == []
 
 
+@pytest.mark.parametrize("remote", [False, True])
+def test_done_event_carries_install_sh_observability_lines(
+    calls, monkeypatch: pytest.MonkeyPatch, remote: bool
+) -> None:
+    """install.sh warns and still exits 0 when observability fails, so the
+    summary must carry its lines or an offline target reads as a success."""
+    output = (pathlib.Path(__file__).parent.parent / "fixtures" / "install-sh" / "offline.txt").read_text(
+        encoding="utf-8"
+    )
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        return deploy.DeployResult(project_name="rig", runtime_version="0.1.45", prefix="/opt/anolis", output=output)
+
+    class _Executor:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(deploy, "deploy_local", _deploy)
+    monkeypatch.setattr(deploy, "deploy_remote", _deploy)
+    monkeypatch.setattr(provision, "ParamikoSSHExecutor", _Executor)
+    monkeypatch.setattr("anolis_workbench.core.fleet.auto_register_host", lambda **kwargs: None)
+    job = provision.ProvisionJob(job_id="j6")
+    if remote:
+        provision._run_remote_job(job, {"project": "rig", "target": "pi@rig", "with_observability": True})
+    else:
+        provision._run_install_job(job, {"project": "rig", "with_observability": True})
+
+    summary = job.events[-1]["summary"]
+    assert summary["observability"] == deploy.observability_lines(output)
+    assert summary["observability"][0] == "⚠ observability: vendor apt repos unreachable (offline?) — skipped"
+    assert summary["grafana_access"] == []
+
+
 def test_allow_unmet_host_needs_a_literal_true(calls, monkeypatch: pytest.MonkeyPatch) -> None:
     def _deploy(**kwargs: Any) -> deploy.DeployResult:
         calls.append(kwargs)
@@ -161,13 +197,21 @@ def test_remote_job_deploys_the_named_project_with_its_variant(calls, monkeypatc
     monkeypatch.setattr("anolis_workbench.core.fleet.auto_register_host", lambda **kwargs: None)
     job = provision.ProvisionJob(job_id="j3")
     provision._run_remote_job(
-        job, {"project": "rig", "variant": "automation", "target": "pi@rig", "with_telemetry_export": True}
+        job,
+        {
+            "project": "rig",
+            "variant": "automation",
+            "target": "pi@rig",
+            "with_telemetry_export": True,
+            "with_observability": True,
+        },
     )
 
     assert job.status == "done"
     assert calls[0]["project_name"] == "rig"
     assert calls[0]["variant"] == "automation"
     assert calls[0]["with_telemetry_export"] is True
+    assert calls[0]["with_observability"] is True
 
 
 def test_telemetry_export_needs_a_literal_true(calls, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -181,3 +225,16 @@ def test_telemetry_export_needs_a_literal_true(calls, monkeypatch: pytest.Monkey
     for value in (True, None, "true", 1):
         provision._run_install_job(provision.ProvisionJob(job_id="j"), {"with_telemetry_export": value})
     assert [c["with_telemetry_export"] for c in calls] == [True, False, False, False]
+
+
+def test_observability_needs_a_literal_true(calls, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Commission's observability option reaches deploy as with_observability (#229)."""
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        calls.append(kwargs)
+        return deploy.DeployResult(project_name="rig", runtime_version="0.1.43", prefix="/opt/anolis", output="")
+
+    monkeypatch.setattr(deploy, "deploy_local", _deploy)
+    for value in (True, None, "true", 1):
+        provision._run_install_job(provision.ProvisionJob(job_id="j"), {"with_observability": value})
+    assert [c["with_observability"] for c in calls] == [True, False, False, False]

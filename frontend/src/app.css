@@ -1345,6 +1345,15 @@ body {
   font-size: 12px;
 }
 
+.deploy-line {
+  display: block;
+}
+
+.deploy-warning {
+  color: var(--state-warning);
+  font-weight: 500;
+}
+
 /* ─── Preflight check details ───────────────────────────────────────────── */
 
 .check-name {

@@ -101,6 +101,7 @@
       reboot_pending?: boolean;
       preserved?: string[];
       runtime_config_kept?: boolean;
+      observability?: string[];
       grafana_access?: string[];
     };
     host_preflight?: string[];
@@ -114,12 +115,14 @@
     rebootPending: boolean;
     preserved: string[];
     runtimeConfigKept: boolean;
+    observability: string[];
     grafanaAccess: string[];
   };
   let deployTarget = $state<"local" | "remote">("remote");
   let deployHost = $state<string>("");
   let deployVariantChoice = $state<string>("");
   let deployTelemetryExport = $state<boolean>(false);
+  let deployObservability = $state<boolean>(false);
   let deployRunning = $state<boolean>(false);
   let deployProgress = $state<string[]>([]);
   let deployOutcome = $state<DeployOutcome | null>(null);
@@ -443,6 +446,7 @@
         rebootPending: data.summary?.reboot_pending ?? false,
         preserved: data.summary?.preserved ?? [],
         runtimeConfigKept: data.summary?.runtime_config_kept === true,
+        observability: data.summary?.observability ?? [],
         grafanaAccess: data.summary?.grafana_access ?? [],
       };
     }
@@ -455,6 +459,7 @@
         rebootPending: data.reboot_pending ?? false,
         preserved: [],
         runtimeConfigKept: false,
+        observability: [],
         grafanaAccess: [],
       };
     }
@@ -475,6 +480,7 @@
     const body: Record<string, unknown> = { project: projectName };
     if (deployVariant) body.variant = deployVariant;
     if (deployTelemetryExport) body.with_telemetry_export = true;
+    if (deployObservability) body.with_observability = true;
     if (deployTarget === "remote") body.target = host;
     try {
       const started = await fetchJson<{ job_id: string }>(
@@ -508,6 +514,7 @@
             rebootPending: false,
             preserved: [],
             runtimeConfigKept: false,
+            observability: [],
             grafanaAccess: [],
           });
         };
@@ -600,6 +607,21 @@
       {#if outcome.hostPreflight.length}
         <p>The host preflight needs attention:</p>
         <pre class="deploy-output">{outcome.hostPreflight.join("\n")}</pre>
+      {/if}
+      {#if outcome.observability.length}
+        <!-- install.sh warns and still exits 0 when observability fails, so
+             a "Deployed" without these lines would hide the failure. -->
+        {#if outcome.observability.some((line) => line.startsWith("⚠"))}
+          <p class="deploy-warning">
+            Observability needs attention: install.sh reported a problem.
+          </p>
+        {:else}
+          <p>install.sh's observability report:</p>
+        {/if}
+        <pre class="deploy-output">{#each outcome.observability as line, i (i)}<span
+              class="deploy-line"
+              class:deploy-warning={line.startsWith("⚠")}>{line}</span
+            >{/each}</pre>
       {/if}
       {#if outcome.grafanaAccess.length}
         <p>Reaching Grafana:</p>
@@ -886,6 +908,15 @@
     <p class="field-note">
       It is installed inert and starts once its tokens are set in /etc/anolis/telemetry-export.env
       on the target.
+    </p>
+    <label>
+      <input type="checkbox" disabled={deployRunning} bind:checked={deployObservability} />
+      Also install observability (InfluxDB + Grafana)
+    </label>
+    <p class="field-note">
+      Installed on the target beside the runtime. Grafana listens on port 3000: on the target's
+      127.0.0.1 only with a current runtime, on its network address with an older one. The deploy
+      result shows install.sh's observability report, and how to reach Grafana.
     </p>
     <button
       type="button"

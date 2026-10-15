@@ -379,6 +379,7 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     });
     await fireEvent.change(variant, { target: { value: 'automation' } });
     await fireEvent.click(screen.getByLabelText('Also install telemetry-export'));
+    await fireEvent.click(screen.getByLabelText('Also install observability (InfluxDB + Grafana)'));
     await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
 
     await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
@@ -390,6 +391,7 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
           variant: 'automation',
           target: 'pi@rig',
           with_telemetry_export: true,
+          with_observability: true,
         },
       },
     ]);
@@ -500,6 +502,62 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     });
     expect(await screen.findByText('Deployed')).toBeInTheDocument();
     expect(document.getElementById('deploy-result')?.textContent).not.toContain('Grafana');
+  });
+
+  it('warns when install.sh reports an observability problem', async () => {
+    setup();
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), {
+      target: { value: 'pi@rig' },
+    });
+    await fireEvent.click(screen.getByLabelText('Also install observability (InfluxDB + Grafana)'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+
+    // tests/fixtures/install-sh/offline.txt, through deploy.observability_lines
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: {
+        runtime_version: '0.1.45',
+        observability: [
+          '⚠ observability: vendor apt repos unreachable (offline?) — skipped',
+          '    The runtime install is unaffected; re-run with --with-observability once online.',
+          '  Grafana bind unchanged: the observability step did not finish (see the warnings above)',
+          '  InfluxDB:  http://127.0.0.1:8086 (org anolis, bucket anolis, retention 30d)',
+        ],
+        grafana_access: [],
+      },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(screen.getByText(/Observability needs attention/)).toBeInTheDocument();
+    const warning = screen.getByText(/vendor apt repos unreachable/);
+    expect(warning).toHaveClass('deploy-warning');
+    expect(screen.getByText(/Grafana bind unchanged/)).not.toHaveClass('deploy-warning');
+  });
+
+  it('shows install.sh observability lines without a warning when all went well', async () => {
+    setup();
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), {
+      target: { value: 'pi@rig' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: {
+        runtime_version: '0.1.45',
+        observability: ['✓ observability: influxdb (:8086) and grafana (:3000) up'],
+      },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(screen.getByText(/grafana \(:3000\) up/)).toBeInTheDocument();
+    expect(screen.queryByText(/Observability needs attention/)).not.toBeInTheDocument();
+  });
+
+  it('says where Grafana listens without promising a tunnel on every runtime', () => {
+    setup();
+    const note = screen.getByText(/Installed on the target beside the runtime/);
+    expect(note.textContent).toContain('127.0.0.1 only');
+    expect(note.textContent).toContain('network address');
   });
 
   it('marks a variant that does not boot inert, and says unsaved edits are not deployed', () => {
