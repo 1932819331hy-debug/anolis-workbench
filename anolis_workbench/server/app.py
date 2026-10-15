@@ -73,7 +73,7 @@ def resolve_config(
             if open_browser is not None
             else _env_bool("ANOLIS_WORKBENCH_OPEN_BROWSER", default_open_browser())
         ),
-        telemetry_url=os.getenv("ANOLIS_TELEMETRY_URL", "http://localhost:3001").rstrip("/"),
+        telemetry_url=os.getenv("ANOLIS_TELEMETRY_URL", "http://localhost:3000").rstrip("/"),
     )
 
 

@@ -124,6 +124,7 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
                     "reboot_pending": result.reboot_pending,
                     "preserved": result.preserved,
                     "runtime_config_kept": result.runtime_config_kept,
+                    "grafana_access": deploy.grafana_access(result.output),
                 },
             }
         )
@@ -182,6 +183,12 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
                     "reboot_pending": result.reboot_pending,
                     "preserved": result.preserved,
                     "runtime_config_kept": result.runtime_config_kept,
+                    "grafana_access": deploy.grafana_access(
+                        result.output,
+                        ssh_target=target,
+                        ssh_port=params.get("port", 22),
+                        ssh_key=params.get("key_file"),
+                    ),
                 },
             }
         )

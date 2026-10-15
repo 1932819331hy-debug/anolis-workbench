@@ -463,6 +463,45 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     expect(screen.getByText(/2 preserved, 0 written/)).toBeInTheDocument();
   });
 
+  it('says how to reach Grafana after an observability install', async () => {
+    setup();
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), {
+      target: { value: 'pi@rig' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: {
+        runtime_version: '0.1.45',
+        grafana_access: [
+          'Grafana listens on 127.0.0.1:3000 on the target. Open a tunnel, then browse http://localhost:3000:',
+          '  ssh -L 3000:127.0.0.1:3000 pi@rig',
+          'admin password: GRAFANA_ADMIN_PASSWORD in /etc/anolis/observability.env on the target (root only)',
+        ],
+      },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    const access = screen.getByText(/ssh -L 3000:127\.0\.0\.1:3000 pi@rig/);
+    expect(access.textContent).toContain('/etc/anolis/observability.env on the target (root only)');
+  });
+
+  it('shows nothing about Grafana when the deploy reports no access', async () => {
+    setup();
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), {
+      target: { value: 'pi@rig' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: { runtime_version: '0.1.45', grafana_access: [] },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(document.getElementById('deploy-result')?.textContent).not.toContain('Grafana');
+  });
+
   it('marks a variant that does not boot inert, and says unsaved edits are not deployed', () => {
     setup();
     expect(screen.getByRole('option', { name: 'manual' })).toBeInTheDocument();

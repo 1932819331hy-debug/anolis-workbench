@@ -46,6 +46,45 @@ def test_done_event_carries_the_preflight_and_reboot(calls, monkeypatch: pytest.
     assert summary["runtime_config_kept"] is True
 
 
+def test_remote_done_event_says_how_to_reach_grafana(calls, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tunnel to the target the job reached, and where the password lives (#241)."""
+    output = (pathlib.Path(__file__).parent.parent / "fixtures" / "install-sh" / "pi-loopback.txt").read_text(
+        encoding="utf-8"
+    )
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        return deploy.DeployResult(project_name="rig", runtime_version="0.1.45", prefix="/opt/anolis", output=output)
+
+    class _Executor:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(deploy, "deploy_remote", _deploy)
+    monkeypatch.setattr(provision, "ParamikoSSHExecutor", _Executor)
+    monkeypatch.setattr("anolis_workbench.core.fleet.auto_register_host", lambda **kwargs: None)
+    job = provision.ProvisionJob(job_id="j4")
+    provision._run_remote_job(
+        job, {"project": "rig", "target": "pi@10.0.0.5", "port": 2200, "key_file": "/home/me/.ssh/rig"}
+    )
+
+    assert job.events[-1]["summary"]["grafana_access"][1] == (
+        "  ssh -p 2200 -i /home/me/.ssh/rig -L 3000:127.0.0.1:3000 pi@10.0.0.5"
+    )
+
+
+def test_local_done_event_has_no_grafana_access_without_observability(calls, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        return deploy.DeployResult(project_name="rig", runtime_version="0.1.45", prefix="/opt/anolis", output="")
+
+    monkeypatch.setattr(deploy, "deploy_local", _deploy)
+    job = provision.ProvisionJob(job_id="j5")
+    provision._run_install_job(job, {"project": "rig"})
+    assert job.events[-1]["summary"]["grafana_access"] == []
+
+
 def test_allow_unmet_host_needs_a_literal_true(calls, monkeypatch: pytest.MonkeyPatch) -> None:
     def _deploy(**kwargs: Any) -> deploy.DeployResult:
         calls.append(kwargs)

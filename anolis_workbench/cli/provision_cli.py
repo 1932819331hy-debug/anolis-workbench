@@ -386,10 +386,12 @@ def _print_host_followups(result: deploy.DeployResult) -> None:
         )
 
 
-def _print_observability(result: deploy.DeployResult) -> None:
-    """What install.sh's observability phase said. It warns and still exits
-    0 on every failure, so without this an offline target reports success
-    with nothing installed."""
+def _print_observability(
+    result: deploy.DeployResult, *, ssh_target: str | None = None, ssh_port: int = 22, ssh_key: str | None = None
+) -> None:
+    """What install.sh's observability phase said, then how to reach Grafana.
+    install.sh warns and still exits 0 on every failure, so without this an
+    offline target reports success with nothing installed."""
     lines = deploy.observability_lines(result.output)
     print()
     print("  Observability (install.sh):")
@@ -401,6 +403,12 @@ def _print_observability(result: deploy.DeployResult) -> None:
         return
     for line in lines:
         print(f"    {line}")
+    access = deploy.grafana_access(result.output, ssh_target=ssh_target, ssh_port=ssh_port, ssh_key=ssh_key)
+    if access:
+        print()
+        print("  Reaching Grafana:")
+        for line in access:
+            print(f"    {line}")
     if any(line.startswith("⚠") for line in lines):
         print("\nWARNING: observability: install.sh reported a problem — see the lines above", file=sys.stderr)
 
@@ -633,7 +641,12 @@ def _run_remote(args: argparse.Namespace) -> int:
     print(f"  ✓ Project: {project_dir}")
     _print_host_followups(result)
     if _wants_observability(args):
-        _print_observability(result)
+        _print_observability(
+            result,
+            ssh_target=f"{user}@{host}",
+            ssh_port=args.port,
+            ssh_key=str(args.key) if args.key else None,
+        )
     print()
     print("Next steps:")
     print(f"  ssh {user}@{host} systemctl status anolis-runtime")

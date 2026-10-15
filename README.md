@@ -86,10 +86,17 @@ tunnel and browse `http://localhost:3000`:
 ssh -L 3000:127.0.0.1:3000 user@host
 ```
 
+After a remote deploy, the provision summary (and Commission's deploy
+result) prints this command for the target it reached. It prints the
+network address instead only when `install.sh` reports Grafana on the
+network. Operate's Grafana link defaults to `http://localhost:3000`, the
+tunnel's end; `ANOLIS_TELEMETRY_URL` overrides it.
+
 `install.sh --with-grafana-network` opens Grafana to the network instead.
 `anolis-provision` does not forward that flag; run `install.sh` on the target
 yourself to use it. The admin password is `GRAFANA_ADMIN_PASSWORD` in
-`/etc/anolis/observability.env` on the target (root only).
+`/etc/anolis/observability.env` on the target (root only); the workbench
+never reads it.
 
 Switching from the old Docker stack: earlier workbench releases ran it from
 `~/.anolis/observability` on the machine running the workbench. On a local

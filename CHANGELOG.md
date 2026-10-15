@@ -26,6 +26,20 @@ Historical note:
   an observability failure as a warning and still exits 0. For a separate
   monitoring host, run the release's `anolis-<version>-observability.tar.gz`
   compose stack on that host.
+- `ANOLIS_TELEMETRY_URL` (Operate's Grafana link) now defaults to
+  `http://localhost:3000` instead of `http://localhost:3001` (#241): the end
+  of the ssh tunnel the deploy summary prints, or Grafana itself after a local
+  install. The runtime release's Docker Compose observability stack still maps
+  Grafana to host port 3001, so set `ANOLIS_TELEMETRY_URL=http://localhost:3001`
+  to keep using that stack.
+
+### Added
+
+- After an observability install, the provision summary and Commission's
+  deploy result say how to reach Grafana (#241): the ssh tunnel command for
+  the target (with its port and key), or the network address when
+  `install.sh` reports Grafana on the network, and where the admin password
+  lives (`/etc/anolis/observability.env` on the target, root only).
 
 ### Removed
 

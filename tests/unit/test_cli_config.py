@@ -32,7 +32,9 @@ def test_resolve_config_defaults():
     assert cfg.port == 3010
     assert cfg.host in ("127.0.0.1", "0.0.0.0")  # appliance-dependent
     assert isinstance(cfg.open_browser, bool)
-    assert cfg.telemetry_url == "http://localhost:3001"
+    # Grafana on the target, through the tunnel the deploy summary prints,
+    # or on this machine after a local install (#241).
+    assert cfg.telemetry_url == "http://localhost:3000"
 
 
 def test_resolve_config_explicit_args_win_over_env(monkeypatch):

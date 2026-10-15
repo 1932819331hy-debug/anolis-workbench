@@ -869,3 +869,69 @@ def test_observability_lines_show_the_bind_unchanged_line() -> None:
         "  Grafana bind unchanged: the observability step did not finish (see the warnings above)",
         "  InfluxDB:  http://127.0.0.1:8086 (org anolis, bucket anolis, retention 30d)",
     ]
+
+
+_PASSWORD_NOTE = "admin password: GRAFANA_ADMIN_PASSWORD in /etc/anolis/observability.env on the target (root only)"
+
+
+def test_grafana_access_is_a_tunnel_when_grafana_is_on_loopback() -> None:
+    assert deploy.grafana_access(_install_sh_output("pi-loopback"), ssh_target="pi@192.168.1.10") == [
+        "Grafana listens on 127.0.0.1:3000 on the target. Open a tunnel, then browse http://localhost:3000:",
+        "  ssh -L 3000:127.0.0.1:3000 pi@192.168.1.10",
+        _PASSWORD_NOTE,
+    ]
+
+
+def test_grafana_access_tunnel_names_a_non_default_ssh_port() -> None:
+    lines = deploy.grafana_access(_install_sh_output("x86-loopback"), ssh_target="me@box", ssh_port=2222)
+    assert lines[1] == "  ssh -p 2222 -L 3000:127.0.0.1:3000 me@box"
+
+
+def test_grafana_access_is_a_tunnel_after_grafana_left_the_network() -> None:
+    lines = deploy.grafana_access(_install_sh_output("pi-was-network"), ssh_target="pi@rig")
+    assert lines[1] == "  ssh -L 3000:127.0.0.1:3000 pi@rig"
+
+
+def test_grafana_access_is_the_address_only_when_install_sh_put_grafana_on_the_network() -> None:
+    assert deploy.grafana_access(_install_sh_output("pi-network"), ssh_target="pi@192.168.1.10") == [
+        "Grafana: http://192.168.1.10:3000",
+        _PASSWORD_NOTE,
+    ]
+
+
+def test_grafana_access_on_a_local_install_is_this_machine() -> None:
+    """A local install may be an appliance browsed from elsewhere, so say
+    whose localhost it is and how to reach it from another machine."""
+    assert deploy.grafana_access(_install_sh_output("x86-loopback")) == [
+        "Grafana: http://localhost:3000 on this machine",
+        "  from another machine: ssh -L 3000:127.0.0.1:3000 <user>@<this machine>, then http://localhost:3000",
+        _PASSWORD_NOTE,
+    ]
+
+
+def test_grafana_access_on_a_local_install_on_the_network() -> None:
+    assert deploy.grafana_access(_install_sh_output("pi-network")) == [
+        "Grafana: port 3000 on this machine's network address (http://localhost:3000 on this machine)",
+        _PASSWORD_NOTE,
+    ]
+
+
+def test_grafana_access_tunnel_names_the_ssh_key() -> None:
+    lines = deploy.grafana_access(
+        _install_sh_output("pi-loopback"), ssh_target="pi@rig", ssh_port=2222, ssh_key="/home/me/keys/rig key"
+    )
+    assert lines[1] == "  ssh -p 2222 -i '/home/me/keys/rig key' -L 3000:127.0.0.1:3000 pi@rig"
+
+
+@pytest.mark.parametrize("host", ["fd00::5", "[fd00::5]"])
+def test_grafana_access_brackets_an_ipv6_target(host: str) -> None:
+    assert deploy.grafana_access(_install_sh_output("pi-network"), ssh_target=f"pi@{host}")[0] == (
+        "Grafana: http://[fd00::5]:3000"
+    )
+    tunnel = deploy.grafana_access(_install_sh_output("pi-loopback"), ssh_target=f"pi@{host}")[1]
+    assert tunnel == "  ssh -L 3000:127.0.0.1:3000 pi@fd00::5"
+
+
+def test_grafana_access_is_empty_when_the_observability_step_did_not_finish() -> None:
+    assert deploy.grafana_access(_install_sh_output("offline"), ssh_target="pi@rig") == []
+    assert deploy.grafana_access("✓ health: runtime responding (v0.1.45)\n", ssh_target="pi@rig") == []
