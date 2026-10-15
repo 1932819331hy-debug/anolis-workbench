@@ -112,6 +112,7 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             project_name=project,
             prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
             variant=params.get("variant"),
+            with_telemetry_export=params.get("with_telemetry_export") is True,
             allow_unmet_host=params.get("allow_unmet_host") is True,
             progress_callback=_progress,
         )
@@ -161,6 +162,7 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             project_name=project,
             prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
             variant=params.get("variant"),
+            with_telemetry_export=params.get("with_telemetry_export") is True,
             allow_unmet_host=params.get("allow_unmet_host") is True,
             progress_callback=_progress,
         )

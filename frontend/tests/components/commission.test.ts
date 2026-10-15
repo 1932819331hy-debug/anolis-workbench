@@ -378,13 +378,19 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
       target: { value: 'pi@rig' },
     });
     await fireEvent.change(variant, { target: { value: 'automation' } });
+    await fireEvent.click(screen.getByLabelText('Also install telemetry-export'));
     await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
 
     await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
     expect(posts).toEqual([
       {
         path: '/api/provision/remote',
-        body: { project: 'demo', variant: 'automation', target: 'pi@rig' },
+        body: {
+          project: 'demo',
+          variant: 'automation',
+          target: 'pi@rig',
+          with_telemetry_export: true,
+        },
       },
     ]);
     const source = DrivenEventSource.instances[0];

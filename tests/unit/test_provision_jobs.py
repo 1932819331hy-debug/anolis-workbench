@@ -121,8 +121,24 @@ def test_remote_job_deploys_the_named_project_with_its_variant(calls, monkeypatc
     monkeypatch.setattr(provision, "ParamikoSSHExecutor", _Executor)
     monkeypatch.setattr("anolis_workbench.core.fleet.auto_register_host", lambda **kwargs: None)
     job = provision.ProvisionJob(job_id="j3")
-    provision._run_remote_job(job, {"project": "rig", "variant": "automation", "target": "pi@rig"})
+    provision._run_remote_job(
+        job, {"project": "rig", "variant": "automation", "target": "pi@rig", "with_telemetry_export": True}
+    )
 
     assert job.status == "done"
     assert calls[0]["project_name"] == "rig"
     assert calls[0]["variant"] == "automation"
+    assert calls[0]["with_telemetry_export"] is True
+
+
+def test_telemetry_export_needs_a_literal_true(calls, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Commission's install option reaches deploy as with_telemetry_export (#229)."""
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        calls.append(kwargs)
+        return deploy.DeployResult(project_name="rig", runtime_version="0.1.43", prefix="/opt/anolis", output="")
+
+    monkeypatch.setattr(deploy, "deploy_local", _deploy)
+    for value in (True, None, "true", 1):
+        provision._run_install_job(provision.ProvisionJob(job_id="j"), {"with_telemetry_export": value})
+    assert [c["with_telemetry_export"] for c in calls] == [True, False, False, False]

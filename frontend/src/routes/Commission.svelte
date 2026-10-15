@@ -117,6 +117,7 @@
   let deployTarget = $state<"local" | "remote">("remote");
   let deployHost = $state<string>("");
   let deployVariantChoice = $state<string>("");
+  let deployTelemetryExport = $state<boolean>(false);
   let deployRunning = $state<boolean>(false);
   let deployProgress = $state<string[]>([]);
   let deployOutcome = $state<DeployOutcome | null>(null);
@@ -469,6 +470,7 @@
     deployOutcome = null;
     const body: Record<string, unknown> = { project: projectName };
     if (deployVariant) body.variant = deployVariant;
+    if (deployTelemetryExport) body.with_telemetry_export = true;
     if (deployTarget === "remote") body.target = host;
     try {
       const started = await fetchJson<{ job_id: string }>(
@@ -867,6 +869,14 @@
       A fresh install accepts only a variant that boots inert. On a device that already has a
       runtime config, install.sh keeps that config: this project's runtime config and the variant
       are not applied over it.
+    </p>
+    <label>
+      <input type="checkbox" disabled={deployRunning} bind:checked={deployTelemetryExport} />
+      Also install telemetry-export
+    </label>
+    <p class="field-note">
+      It is installed inert and starts once its tokens are set in /etc/anolis/telemetry-export.env
+      on the target.
     </p>
     <button
       type="button"
