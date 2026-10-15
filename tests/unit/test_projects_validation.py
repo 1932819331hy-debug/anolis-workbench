@@ -433,6 +433,72 @@ def test_a_skewed_pin_still_validates_the_config(_systems_root: pathlib.Path, ca
 
 
 # ---------------------------------------------------------------------------
+# Providers with no declared software safe state (#371)
+# ---------------------------------------------------------------------------
+
+
+def _safe_state_hits(document: dict) -> list[str]:
+    return [w for w in document["warnings"] if projects.SAFE_STATE_WARNING in w]
+
+
+def test_providers_with_an_empty_safe_state_warn_on_read(_systems_root: pathlib.Path) -> None:
+    document = _load_template("sim-quickstart")
+    assert _manual(document)["providers"]
+    assert "safety" not in _manual(document)
+    projects.save_project("rig", document)
+
+    hits = _safe_state_hits(projects.get_project("rig"))
+
+    assert hits == [f"Variant 'manual' has providers and no safety.safe_state. {projects.SAFE_STATE_WARNING}"]
+
+
+def test_the_warning_is_derived_so_declaring_a_safe_state_clears_it(_systems_root: pathlib.Path) -> None:
+    projects.save_project("rig", _load_template("sim-quickstart"))
+    document = projects.get_project("rig")
+    assert _safe_state_hits(document)
+
+    _manual(document)["safety"] = {"safe_state": {"zero_is_safe": True}}
+    projects.save_project("rig", document)
+
+    assert _safe_state_hits(projects.get_project("rig")) == []
+
+
+def test_a_variant_without_providers_does_not_warn() -> None:
+    document = _load_template("sim-quickstart")
+    _manual(document)["providers"] = []
+
+    assert projects.safe_state_warnings(document) == []
+
+
+@pytest.mark.parametrize(
+    "safe_state",
+    [
+        {"hooks": [{"device_handle": "sim0/tempctl0", "function_name": "set_relay", "args": {"on": False}}]},
+        {"setpoints": [{"device_handle": "sim0/motorctl0", "function_name": "set_motor_duty", "args": {"duty": 0}}]},
+        {"zero_is_safe": True},
+    ],
+    ids=["hooks", "setpoints", "zero_is_safe"],
+)
+def test_a_declared_safe_state_does_not_warn(safe_state: dict) -> None:
+    document = _load_template("sim-quickstart")
+    _manual(document)["safety"] = {"safe_state": safe_state}
+
+    assert projects.safe_state_warnings(document) == []
+
+
+@pytest.mark.parametrize(
+    "safety",
+    [{}, {"safe_state": {}}, {"safe_state": {"hooks": [], "setpoints": [], "zero_is_safe": False}}],
+    ids=["no-safe-state", "empty-safe-state", "all-empty"],
+)
+def test_an_empty_safe_state_warns(safety: dict) -> None:
+    document = _load_template("sim-quickstart")
+    _manual(document)["safety"] = safety
+
+    assert len(projects.safe_state_warnings(document)) == 1
+
+
+# ---------------------------------------------------------------------------
 # Onboarding's marker ends with the user's first save or copy (#424)
 # ---------------------------------------------------------------------------
 
