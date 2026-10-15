@@ -41,6 +41,18 @@ REBOOT_REQUIRED_PATH = "/run/reboot-required"
 _PREFLIGHT_MARK = "host preflight:"
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
+# install.sh keeps this file when it already exists, and then applies neither
+# the project's runtime config nor --variant (anolis tools/install.sh,
+# phase_config_runtime).
+RUNTIME_CONFIG_RELPATH = "config/runtime.yaml"
+
+# install.sh's messages for a config it found on the target and left in place.
+# Its other "preserved" lines (the API token, the rollback backup, the
+# telemetry-export venv) are kept on every redeploy and say nothing about the
+# configs the runtime runs.
+_RUNTIME_CONFIG_MESSAGE = "config (runtime):"
+_PRESERVED_CONFIG_MESSAGES = (_RUNTIME_CONFIG_MESSAGE, "config (providers):", "telemetry-export: config")
+
 ProgressCallback = Callable[[str, str], None]
 
 
@@ -73,6 +85,10 @@ class DeployResult:
     # provider gave no answer.
     host_preflight: list[str] = field(default_factory=list)
     reboot_pending: bool = False
+    # install.sh's lines naming the configs an existing install kept, ANSI
+    # stripped; runtime_config_kept says whether runtime.yaml is among them.
+    preserved: list[str] = field(default_factory=list)
+    runtime_config_kept: bool = False
 
 
 def materialize_project_dir(
@@ -360,6 +376,47 @@ def host_preflight_block(stdout: str) -> list[str]:
     return block
 
 
+def _message(line: str) -> str:
+    """An install.sh log line without its leading mark."""
+    return line[1:].strip()
+
+
+def preserved_lines(stdout: str) -> list[str]:
+    """install.sh's skip and warning lines for configs it found and left in
+    place, ANSI stripped: the runtime config (with the warning that --variant
+    was not applied), provider configs, telemetry-export's config."""
+    lines = _ANSI_RE.sub("", stdout).splitlines()
+    return [
+        line.strip()
+        for line in lines
+        if line.startswith(("→", "⚠")) and "preserved" in line and _message(line).startswith(_PRESERVED_CONFIG_MESSAGES)
+    ]
+
+
+def runtime_config_kept(preserved: list[str]) -> bool:
+    """Whether install.sh kept the target's existing runtime.yaml."""
+    return any(_message(line).startswith(_RUNTIME_CONFIG_MESSAGE) for line in preserved)
+
+
+def _existing_config_notice(executor: Executor, prefix: pathlib.Path, variant: str | None) -> str | None:
+    """Say, before install.sh runs, that the target's runtime config will be
+    kept. Advisory only: a target we cannot ask gets no notice."""
+    path = (pathlib.PurePosixPath(prefix) / RUNTIME_CONFIG_RELPATH).as_posix()
+    try:
+        exists = executor.file_exists(path)
+    except Exception:  # noqa: BLE001 — never mask the deploy's own outcome
+        logger.warning("could not check %s on the target", path, exc_info=True)
+        return None
+    if not exists:
+        return None
+    notice = (
+        f"{path} exists on the target and is kept: install.sh does not replace it with this project's runtime config"
+    )
+    if variant is not None:
+        notice += f", and variant '{variant}' is not applied"
+    return notice + "."
+
+
 def _preflight_needs_attention(block: list[str]) -> bool:
     return any(line.startswith(("✗", "⚠")) for line in block)
 
@@ -424,6 +481,8 @@ def deploy_local(
         mat = materialize_project_dir(project_dir, tmp, variant=variant)
         _progress("fetch", f"Fetching install.sh v{mat.runtime_version}")
         install_sh = fetch_install_sh(mat.runtime_version, tmp)
+        if notice := _existing_config_notice(executor, prefix, variant):
+            _progress("existing-config", notice)
         _progress("install", f"Running install.sh --project (runtime v{mat.runtime_version})")
         output, preflight, reboot = _run_install_sh(
             executor,
@@ -439,6 +498,7 @@ def deploy_local(
             ),
             progress_callback,
         )
+    preserved = preserved_lines(output)
     return DeployResult(
         project_name=project_name,
         runtime_version=mat.runtime_version,
@@ -446,6 +506,8 @@ def deploy_local(
         output=output,
         host_preflight=preflight,
         reboot_pending=reboot,
+        preserved=preserved,
+        runtime_config_kept=runtime_config_kept(preserved),
     )
 
 
@@ -481,6 +543,8 @@ def deploy_remote(
         remote_install = f"{remote_staging}/install.sh"
         executor.write_file(remote_install, install_sh.read_bytes())
 
+        if notice := _existing_config_notice(executor, prefix, variant):
+            _progress("existing-config", notice)
         _progress("install", f"Running install.sh --project on target (runtime v{mat.runtime_version})")
         output, preflight, reboot = _run_install_sh(
             executor,
@@ -496,6 +560,7 @@ def deploy_remote(
             ),
             progress_callback,
         )
+    preserved = preserved_lines(output)
     return DeployResult(
         project_name=project_name,
         runtime_version=mat.runtime_version,
@@ -503,6 +568,8 @@ def deploy_remote(
         output=output,
         host_preflight=preflight,
         reboot_pending=reboot,
+        preserved=preserved,
+        runtime_config_kept=runtime_config_kept(preserved),
     )
 
 

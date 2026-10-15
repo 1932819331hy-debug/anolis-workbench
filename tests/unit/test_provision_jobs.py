@@ -28,6 +28,8 @@ def test_done_event_carries_the_preflight_and_reboot(calls, monkeypatch: pytest.
             output="",
             host_preflight=["⚠ host preflight: continuing (--allow-unmet-host); those providers start up not ready"],
             reboot_pending=True,
+            preserved=["→ config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)"],
+            runtime_config_kept=True,
         )
 
     monkeypatch.setattr(deploy, "deploy_local", _deploy)
@@ -40,6 +42,8 @@ def test_done_event_carries_the_preflight_and_reboot(calls, monkeypatch: pytest.
     assert summary["runtime_version"] == "0.1.43"
     assert summary["host_preflight"][0].startswith("⚠ host preflight: continuing")
     assert summary["reboot_pending"] is True
+    assert summary["preserved"] == ["→ config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)"]
+    assert summary["runtime_config_kept"] is True
 
 
 def test_allow_unmet_host_needs_a_literal_true(calls, monkeypatch: pytest.MonkeyPatch) -> None:

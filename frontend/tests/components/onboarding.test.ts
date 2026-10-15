@@ -242,3 +242,72 @@ describe("Onboarding.svelte — install progress and result (#228)", () => {
     expect(DrivenEventSource.instances.length).toBe(0);
   });
 });
+
+describe("Onboarding.svelte — an existing install's config is kept (#354)", () => {
+  it("says before installing that an existing install's configs are kept", () => {
+    setup();
+    expect(
+      screen.getByText(/already has anolis installed, install\.sh keeps the existing runtime/),
+    ).toBeInTheDocument();
+  });
+
+  it("names what was kept instead of an unqualified success", async () => {
+    setup();
+    const source = await startLocal();
+
+    source.emit({
+      stage: "existing-config",
+      detail:
+        "/opt/anolis/config/runtime.yaml exists on the target and is kept: install.sh does not replace it with this project's runtime config.",
+    });
+    expect(
+      await screen.findByText(/runtime\.yaml exists on the target and is kept/),
+    ).toBeInTheDocument();
+
+    source.emit({
+      stage: "done",
+      summary: {
+        runtime_version: "0.1.43",
+        host_preflight: [],
+        reboot_pending: false,
+        preserved: ["→ config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)"],
+        runtime_config_kept: true,
+      },
+    });
+
+    expect(
+      await screen.findByText(/existing runtime config was kept; the runtime runs it/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/runtime\.yaml exists \(preserved\)/)).toBeInTheDocument();
+  });
+
+  it("does not call a freshly written runtime config kept after a variant switch", async () => {
+    setup();
+    const source = await startLocal();
+
+    // install.sh after "remove runtime.yaml and re-run": runtime.yaml was
+    // written fresh, the provider configs were kept.
+    source.emit({
+      stage: "done",
+      summary: {
+        runtime_version: "0.1.43",
+        preserved: ["→ config (providers): 2 preserved, 0 written"],
+        runtime_config_kept: false,
+      },
+    });
+
+    expect(await screen.findByText("anolis-runtime v0.1.43 is installed.")).toBeInTheDocument();
+    expect(screen.queryByText(/runtime config was kept/)).not.toBeInTheDocument();
+    expect(screen.getByText(/left these existing configs in place/)).toBeInTheDocument();
+    expect(screen.getByText(/2 preserved, 0 written/)).toBeInTheDocument();
+  });
+
+  it("says nothing was kept when nothing was", async () => {
+    setup();
+    const source = await startLocal();
+    source.emit({ stage: "done", summary: { runtime_version: "0.1.43", preserved: [] } });
+    expect(await screen.findByText("anolis-runtime v0.1.43 is installed.")).toBeInTheDocument();
+    expect(screen.queryByText(/runtime config was kept/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/left these existing configs in place/)).not.toBeInTheDocument();
+  });
+});
