@@ -871,14 +871,14 @@ def test_observability_lines_show_the_bind_unchanged_line() -> None:
     ]
 
 
-_PASSWORD_NOTE = "admin password: GRAFANA_ADMIN_PASSWORD in /etc/anolis/observability.env on the target (root only)"
+_ADMIN_LOGIN_NOTE = "admin password: GRAFANA_ADMIN_PASSWORD in /etc/anolis/observability.env on the target (root only)"
 
 
 def test_grafana_access_is_a_tunnel_when_grafana_is_on_loopback() -> None:
     assert deploy.grafana_access(_install_sh_output("pi-loopback"), ssh_target="pi@192.168.1.10") == [
         "Grafana listens on 127.0.0.1:3000 on the target. Open a tunnel, then browse http://localhost:3000:",
         "  ssh -L 3000:127.0.0.1:3000 pi@192.168.1.10",
-        _PASSWORD_NOTE,
+        _ADMIN_LOGIN_NOTE,
     ]
 
 
@@ -895,7 +895,7 @@ def test_grafana_access_is_a_tunnel_after_grafana_left_the_network() -> None:
 def test_grafana_access_is_the_address_only_when_install_sh_put_grafana_on_the_network() -> None:
     assert deploy.grafana_access(_install_sh_output("pi-network"), ssh_target="pi@192.168.1.10") == [
         "Grafana: http://192.168.1.10:3000",
-        _PASSWORD_NOTE,
+        _ADMIN_LOGIN_NOTE,
     ]
 
 
@@ -905,14 +905,14 @@ def test_grafana_access_on_a_local_install_is_this_machine() -> None:
     assert deploy.grafana_access(_install_sh_output("x86-loopback")) == [
         "Grafana: http://localhost:3000 on this machine",
         "  from another machine: ssh -L 3000:127.0.0.1:3000 <user>@<this machine>, then http://localhost:3000",
-        _PASSWORD_NOTE,
+        _ADMIN_LOGIN_NOTE,
     ]
 
 
 def test_grafana_access_on_a_local_install_on_the_network() -> None:
     assert deploy.grafana_access(_install_sh_output("pi-network")) == [
         "Grafana: port 3000 on this machine's network address (http://localhost:3000 on this machine)",
-        _PASSWORD_NOTE,
+        _ADMIN_LOGIN_NOTE,
     ]
 
 

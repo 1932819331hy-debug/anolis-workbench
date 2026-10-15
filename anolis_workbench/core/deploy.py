@@ -434,7 +434,7 @@ def observability_lines(stdout: str) -> list[str]:
 # included, means the observability step did not finish.
 _GRAFANA_NETWORK_RE = re.compile(r"^\s*Grafana:\s+http://\S+:3000 ")
 _GRAFANA_LOOPBACK_RE = re.compile(r"^\s*Grafana:\s+127\.0\.0\.1:3000 on this machine")
-GRAFANA_PASSWORD_NOTE = (
+GRAFANA_ADMIN_LOGIN_NOTE = (
     "admin password: GRAFANA_ADMIN_PASSWORD in /etc/anolis/observability.env on the target (root only)"
 )
 
@@ -457,23 +457,23 @@ def grafana_access(
         if on_network:
             return [
                 "Grafana: port 3000 on this machine's network address (http://localhost:3000 on this machine)",
-                GRAFANA_PASSWORD_NOTE,
+                GRAFANA_ADMIN_LOGIN_NOTE,
             ]
         return [
             "Grafana: http://localhost:3000 on this machine",
             "  from another machine: ssh -L 3000:127.0.0.1:3000 <user>@<this machine>, then http://localhost:3000",
-            GRAFANA_PASSWORD_NOTE,
+            GRAFANA_ADMIN_LOGIN_NOTE,
         ]
     user, _, host = ssh_target.rpartition("@")
     host = host.removeprefix("[").removesuffix("]")
     if on_network:
         url_host = f"[{host}]" if ":" in host else host
-        return [f"Grafana: http://{url_host}:3000", GRAFANA_PASSWORD_NOTE]
+        return [f"Grafana: http://{url_host}:3000", GRAFANA_ADMIN_LOGIN_NOTE]
     options = (f"-p {ssh_port} " if ssh_port != 22 else "") + (f"-i {shlex.quote(ssh_key)} " if ssh_key else "")
     return [
         "Grafana listens on 127.0.0.1:3000 on the target. Open a tunnel, then browse http://localhost:3000:",
         f"  ssh {options}-L 3000:127.0.0.1:3000 {user}@{host}",
-        GRAFANA_PASSWORD_NOTE,
+        GRAFANA_ADMIN_LOGIN_NOTE,
     ]
 
 
