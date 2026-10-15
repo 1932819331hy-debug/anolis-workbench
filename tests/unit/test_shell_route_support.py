@@ -224,6 +224,15 @@ def test_unknown_static_path_returns_not_found(workbench_server: dict[str, Any])
         assert payload.get("error") == "Not found", path
 
 
+def test_provision_cancel_route_does_not_exist(workbench_server: dict[str, Any]) -> None:
+    # Cancel set a flag nothing read while install.sh ran on as root (#348),
+    # so there is no cancel: the route falls through to the generic 404.
+    base_url = workbench_server["base_url"]
+    status_code, payload = _http_json(base_url, "/api/provision/cancel/abc123", method="POST", body={})
+    assert status_code == 404
+    assert payload.get("error") == "Not found"
+
+
 def test_invalid_project_name_is_rejected(workbench_server: dict[str, Any]) -> None:
     base_url = workbench_server["base_url"]
     bad_name = urllib.parse.quote("bad$name", safe="")

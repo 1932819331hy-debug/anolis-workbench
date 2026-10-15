@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import App from "../../src/App.svelte";
 import Onboarding from "../../src/routes/Onboarding.svelte";
-import { jsonResponse } from "./helpers";
+import { jsonResponse, pathFromInput } from "./helpers";
 
 // install.sh v0.1.43's host-preflight block, as the deploy job carries it
 // (ANSI stripped), from a run with the service user out of the bus's group.
@@ -43,7 +44,9 @@ class DrivenEventSource {
   }
 }
 
-function setup(jobIds: string[] = ["job-1"]) {
+/** `probeStatus` answers a plain GET of a job's status URL, which the view
+ *  makes after a dropped stream to learn whether the server still has it. */
+function setup(jobIds: string[] = ["job-1"], probeStatus = 200) {
   DrivenEventSource.instances = [];
   vi.stubGlobal("EventSource", DrivenEventSource as unknown as typeof EventSource);
   const posts: { url: string; body: Record<string, unknown> }[] = [];
@@ -57,6 +60,7 @@ function setup(jobIds: string[] = ["job-1"]) {
         runtime_path: "",
       });
     }
+    if (url.startsWith("/api/provision/status/")) return jsonResponse(probeStatus, {});
     posts.push({ url, body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
     return jsonResponse(202, { job_id: ids.shift() ?? "job-x" });
   });
@@ -72,6 +76,10 @@ async function startLocal(): Promise<DrivenEventSource> {
   return DrivenEventSource.instances.at(-1)!;
 }
 
+beforeEach(() => {
+  sessionStorage.clear();
+});
+
 describe("Onboarding.svelte — install progress and result (#228)", () => {
   it("stays in onboarding and shows stages live instead of navigating away", async () => {
     const { onNavigate } = setup();
@@ -79,7 +87,7 @@ describe("Onboarding.svelte — install progress and result (#228)", () => {
 
     expect(source.url).toBe("/api/provision/status/job-1");
     expect(onNavigate).not.toHaveBeenCalled();
-    expect(screen.getByText(/Reloading loses this view/)).toBeInTheDocument();
+    expect(screen.getByText(/Reloading this page reattaches/)).toBeInTheDocument();
 
     source.emit({ stage: "fetch", detail: "Fetching install.sh v0.1.43" });
     expect(await screen.findByText("Fetching install.sh v0.1.43")).toBeInTheDocument();
@@ -240,6 +248,151 @@ describe("Onboarding.svelte — install progress and result (#228)", () => {
 
     expect(await screen.findByText(/install already running/)).toBeInTheDocument();
     expect(DrivenEventSource.instances.length).toBe(0);
+  });
+});
+
+describe("Onboarding.svelte — a reload reattaches to the running job (#348)", () => {
+  it("reattaches to the same job's stream after a reload and rebuilds it from the replay", async () => {
+    setup();
+    const first = await startLocal();
+    first.emit({ stage: "fetch", detail: "Fetching install.sh v0.1.43" });
+
+    cleanup();
+    render(Onboarding, { props: { onNavigate: vi.fn() } });
+
+    const second = DrivenEventSource.instances.at(-1)!;
+    expect(DrivenEventSource.instances.length).toBe(2);
+    expect(second.url).toBe("/api/provision/status/job-1");
+    expect(screen.getByText("Installing…")).toBeInTheDocument();
+
+    second.emit({ stage: "fetch", detail: "Fetching install.sh v0.1.43" });
+    second.emit({ stage: "done", summary: { runtime_version: "0.1.43" } });
+    expect(await screen.findByText("anolis-runtime v0.1.43 is installed.")).toBeInTheDocument();
+  });
+
+  it("keeps Install anyway working after a reload, with the original request", async () => {
+    const { posts } = setup(["job-1", "job-2"]);
+    await startLocal();
+
+    cleanup();
+    render(Onboarding, { props: { onNavigate: vi.fn() } });
+    DrivenEventSource.instances.at(-1)!.emit({
+      stage: "error",
+      detail: UNMET_BLOCK.join("\n"),
+      host_preflight: UNMET_BLOCK,
+      reboot_pending: false,
+    });
+    await fireEvent.click(await screen.findByRole("button", { name: "Install anyway…" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Confirm: install anyway" }));
+
+    await waitFor(() => expect(posts.length).toBe(2));
+    expect(posts[1]).toEqual({ url: "/api/provision/install", body: { allow_unmet_host: true } });
+  });
+
+  it("forgets the job once it has ended, so the next load starts at the choice", async () => {
+    setup();
+    const source = await startLocal();
+    source.emit({ stage: "done", summary: { runtime_version: "0.1.43" } });
+    await screen.findByText("anolis-runtime v0.1.43 is installed.");
+
+    cleanup();
+    render(Onboarding, { props: { onNavigate: vi.fn() } });
+
+    expect(DrivenEventSource.instances.length).toBe(1);
+    expect(screen.getByRole("button", { name: /Set up this device/ })).toBeInTheDocument();
+  });
+
+  it("reopens onboarding in the shell on a reload, although the install has created a project", async () => {
+    setup();
+    await startLocal();
+    cleanup();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = pathFromInput(input);
+        if (path === "/api/projects")
+          return jsonResponse(200, [{ name: "sim-quickstart", meta: {} }]);
+        if (path === "/api/status")
+          return jsonResponse(200, { running: false, active_project: null });
+        if (path === "/api/templates") return jsonResponse(200, []);
+        if (path === "/api/provider-schemas") return jsonResponse(200, { providers: {} });
+        return jsonResponse(200, {});
+      }),
+    );
+    history.replaceState({}, "", "/");
+    render(App);
+
+    expect(await screen.findByText("Installing…")).toBeInTheDocument();
+    expect(DrivenEventSource.instances.at(-1)!.url).toBe("/api/provision/status/job-1");
+  });
+});
+
+describe("Onboarding.svelte — storage and dropped streams (#348)", () => {
+  /** A sessionStorage whose `refuse` method throws, as a full or denied
+   *  store does. The shared afterEach unstubs it. */
+  function refusingStorage(refuse: "setItem" | "removeItem"): void {
+    const items = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => items.get(key) ?? null,
+      setItem: (key: string, value: string) => void items.set(key, value),
+      removeItem: (key: string) => void items.delete(key),
+      clear: () => items.clear(),
+    };
+    storage[refuse] = () => {
+      throw new DOMException("refused", "QuotaExceededError");
+    };
+    vi.stubGlobal("sessionStorage", storage);
+  }
+
+  it("attaches to a started install even when sessionStorage refuses the write", async () => {
+    refusingStorage("setItem");
+    const { posts } = setup();
+
+    await startLocal();
+
+    expect(posts.length).toBe(1);
+    expect(DrivenEventSource.instances.length).toBe(1);
+    expect(screen.getByText("Installing…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set up this device/ })).not.toBeInTheDocument();
+  });
+
+  it("shows the result even when sessionStorage refuses the removal", async () => {
+    refusingStorage("removeItem");
+    setup();
+    const source = await startLocal();
+
+    source.emit({ stage: "done", summary: { runtime_version: "0.1.43" } });
+
+    expect(await screen.findByText("anolis-runtime v0.1.43 is installed.")).toBeInTheDocument();
+  });
+
+  it("keeps the job after a dropped stream, so a reload reattaches to it", async () => {
+    setup();
+    const first = await startLocal();
+
+    first.fail();
+    await screen.findByText(/Lost the connection to the workbench while installing/);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    cleanup();
+    render(Onboarding, { props: { onNavigate: vi.fn() } });
+
+    expect(DrivenEventSource.instances.length).toBe(2);
+    expect(DrivenEventSource.instances[1].url).toBe("/api/provision/status/job-1");
+  });
+
+  it("forgets the job after a dropped stream when the server no longer has it", async () => {
+    setup(["job-1"], 404);
+    const first = await startLocal();
+
+    first.fail();
+    await waitFor(() =>
+      expect(sessionStorage.getItem("anolis-workbench.provision-job")).toBeNull(),
+    );
+    cleanup();
+    render(Onboarding, { props: { onNavigate: vi.fn() } });
+
+    expect(DrivenEventSource.instances.length).toBe(1);
   });
 });
 

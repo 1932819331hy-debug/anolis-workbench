@@ -102,37 +102,6 @@ class TestStartRemote:
         assert "job_id" in data
 
 
-class TestCancelJob:
-    def test_cancel_running_job(self) -> None:
-        job = provision._create_job()
-        handler = FakeHandler()
-
-        provision.cancel_job(handler, job.job_id)
-
-        status, data = handler._responses[0]
-        assert status == 200
-        assert data["status"] == "cancelled"
-        assert job.status == "cancelled"
-
-    def test_cancel_nonexistent_job(self) -> None:
-        handler = FakeHandler()
-
-        provision.cancel_job(handler, "nonexistent")
-
-        status, data = handler._responses[0]
-        assert status == 404
-
-    def test_cancel_already_done_job(self) -> None:
-        job = provision._create_job()
-        job.status = "done"
-        handler = FakeHandler()
-
-        provision.cancel_job(handler, job.job_id)
-
-        status, data = handler._responses[0]
-        assert status == 409
-
-
 class TestGetStatus:
     def test_returns_404_for_nonexistent_job(self) -> None:
         handler = FakeHandler()

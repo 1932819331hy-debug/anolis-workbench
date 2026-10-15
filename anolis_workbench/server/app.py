@@ -175,9 +175,6 @@ class _Handler(BaseHTTPRequestHandler):
             self._trigger_update()
         elif path == "/api/rollback":
             self._trigger_rollback()
-        elif path.startswith("/api/provision/cancel/"):
-            job_id = path.split("/")[-1]
-            provision.cancel_job(self, job_id)
         elif path == "/api/projects":
             compose.create_project(self)
         elif path == "/api/projects/import":

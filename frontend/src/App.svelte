@@ -3,7 +3,7 @@
   import ConfirmModal from "./lib/ConfirmModal.svelte";
   import Home from "./routes/Home.svelte";
   import Fleet from "./routes/Fleet.svelte";
-  import Onboarding from "./routes/Onboarding.svelte";
+  import Onboarding, { readPendingJob } from "./routes/Onboarding.svelte";
   import Compose from "./routes/Compose.svelte";
   import Commission from "./routes/Commission.svelte";
   import Operate from "./routes/Operate.svelte";
@@ -242,15 +242,20 @@
         refreshStatus(),
       ]);
 
-      // First run lasts until a deploy has succeeded, whatever projects a
-      // failed attempt left behind (#424).
-      try {
-        const ob = await fetchJson<{ first_run: boolean }>("/api/onboarding");
-        if (ob.first_run) {
-          showOnboarding = true;
+      // Onboarding reopens on a provision job it started, which by then has
+      // created its project. Otherwise first run lasts until a deploy has
+      // succeeded, whatever projects a failed attempt left behind (#424).
+      if (readPendingJob()) {
+        showOnboarding = true;
+      } else {
+        try {
+          const ob = await fetchJson<{ first_run: boolean }>("/api/onboarding");
+          if (ob.first_run) {
+            showOnboarding = true;
+          }
+        } catch {
+          // Non-fatal — just show normal home
         }
-      } catch {
-        // Non-fatal — just show normal home
       }
 
       await navigateTo(window.location.pathname, { replaceHistory: true, bypassGuards: true });

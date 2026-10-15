@@ -35,10 +35,9 @@ class ProvisionJob:
     """In-progress or completed provision job."""
 
     job_id: str
-    status: str = "running"  # running | done | failed | cancelled
+    status: str = "running"  # running | done | failed
     events: list[dict[str, Any]] = field(default_factory=list)
     error: str | None = None
-    _cancel: bool = field(default=False, repr=False)
 
 
 _jobs: dict[str, ProvisionJob] = {}
@@ -257,7 +256,7 @@ def get_status(handler: Any, job_id: str) -> None:
             handler.wfile.flush()
             sent += 1
 
-        if job.status in ("done", "failed", "cancelled"):
+        if job.status in ("done", "failed"):
             # Send final status event
             final = json.dumps({"stage": "status", "status": job.status, "error": job.error})
             handler.wfile.write(f"data: {final}\n\n".encode())
@@ -265,21 +264,6 @@ def get_status(handler: Any, job_id: str) -> None:
             break
 
         time.sleep(0.2)
-
-
-def cancel_job(handler: Any, job_id: str) -> None:
-    """POST /api/provision/cancel/<job_id> — cancel a running job."""
-    job = _get_job(job_id)
-    if job is None:
-        handler._json(404, {"error": f"Job {job_id} not found"})
-        return
-
-    if job.status == "running":
-        job._cancel = True
-        job.status = "cancelled"
-        handler._json(200, {"job_id": job_id, "status": "cancelled"})
-    else:
-        handler._json(409, {"error": f"Job already {job.status}"})
 
 
 # ---------------------------------------------------------------------------
