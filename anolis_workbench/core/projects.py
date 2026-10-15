@@ -421,6 +421,28 @@ def _with_derived_warnings(document: dict) -> list[str]:
     return warnings + [w for w in derived if w not in warnings]
 
 
+def _strip_influx_tokens(document: dict) -> list[str]:
+    """An authored project migrated before #257 can carry an InfluxDB token,
+    which validation now rejects and the form has no field to clear. Drop it
+    from the served document; the next save writes the config without it.
+    Imported projects are carried verbatim and keep it, and deploy names the
+    file to fix."""
+    if not document.get("authored"):
+        return []
+    declared = document.get("profile", {}).get("runtime_profiles")
+    declared = declared if isinstance(declared, dict) else {}
+    notes = []
+    for variant, doc in sorted(document.get("variants", {}).items()):
+        if canonical.strip_influx_token(doc):
+            rel = declared.get(variant)
+            path = rel if isinstance(rel, str) else canonical.variant_relpath(variant)
+            notes.append(
+                f"Removed telemetry.influxdb.token from runtime variant '{variant}' ({path}); "
+                "save to apply. The runtime reads INFLUXDB_TOKEN from its environment."
+            )
+    return notes
+
+
 def get_project(name: str) -> dict:
     """The whole canonical project as one document.
 
@@ -435,7 +457,7 @@ def get_project(name: str) -> dict:
         except (machine_profile.ProfileError, canonical.CanonicalError) as exc:
             return {**_degraded_project(name), "warnings": [str(exc)]}
         document["meta"] = document.get("meta") or {"name": name}
-        document["warnings"] = _with_derived_warnings(document)
+        document["warnings"] = _with_derived_warnings(document) + _strip_influx_tokens(document)
         return document
     if fmt == FORMAT_SYSTEM:
         # Listed (hiding it would look like deletion) but not migratable, so

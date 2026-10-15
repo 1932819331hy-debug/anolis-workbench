@@ -218,6 +218,35 @@ def runtime_config_errors(doc: Any) -> list[str]:
     ]
 
 
+def influx_token_error(doc: Any) -> str | None:
+    """An authored `telemetry.influxdb.token`, which no project may carry.
+
+    The runtime applies INFLUXDB_TOKEN from its environment only when the
+    config's token is empty, and deploy stages the config verbatim, so an
+    authored token would shadow the target's real one.
+    """
+    telemetry = doc.get("telemetry") if isinstance(doc, dict) else None
+    influxdb = telemetry.get("influxdb") if isinstance(telemetry, dict) else None
+    token = influxdb.get("token") if isinstance(influxdb, dict) else None
+    if token is None or token == "":
+        return None
+    return (
+        "telemetry.influxdb.token is set. Remove it and provide INFLUXDB_TOKEN in the runtime's "
+        "environment: the runtime reads INFLUXDB_TOKEN only when the config's token is empty, so an "
+        "authored token shadows the target's own."
+    )
+
+
+def strip_influx_token(doc: Any) -> bool:
+    """Drop an authored `telemetry.influxdb.token`; True when one was there."""
+    telemetry = doc.get("telemetry") if isinstance(doc, dict) else None
+    influxdb = telemetry.get("influxdb") if isinstance(telemetry, dict) else None
+    if not isinstance(influxdb, dict) or influx_token_error(doc) is None:
+        return False
+    del influxdb["token"]
+    return True
+
+
 # install.sh's inertness gate is an AWK PASS OVER THE RAW YAML, not a structural
 # read of the parsed document, and mirroring it structurally drifts in both
 # directions: it misses an `enabled:` that only appears as a wrapped line of a

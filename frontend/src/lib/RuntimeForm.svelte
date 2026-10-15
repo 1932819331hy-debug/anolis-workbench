@@ -242,20 +242,6 @@
       />
     </div>
     <div class="form-group">
-      <label>InfluxDB token</label>
-      <input
-        type="text"
-        spellcheck="false"
-        style="font-family:monospace"
-        value={rt.telemetry?.influxdb?.token ?? ""}
-        oninput={(e: Event) => setInflux("token", inputTarget(e).value)}
-      />
-      <span class="field-note"
-        >Stored in the runtime config for the checked-in dev telemetry profile. Handoff export
-        strips it — the target reads INFLUXDB_TOKEN from the environment.</span
-      >
-    </div>
-    <div class="form-group">
       <label>Influx batch size</label>
       <input
         type="number"

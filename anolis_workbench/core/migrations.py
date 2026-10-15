@@ -247,7 +247,8 @@ def _legacy_telemetry(rt: dict[str, Any]) -> dict[str, Any]:
         "url",
         "org",
         "bucket",
-        "token",
+        # No "token": the runtime reads INFLUXDB_TOKEN from its environment,
+        # and a token in the config would shadow it (#257).
         "batch_size",
         "flush_interval_ms",
         "max_retry_buffer_size",

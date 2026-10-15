@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 import requests
+import yaml
 
 from anolis_workbench.core import canonical, machine_profile, releases
 from anolis_workbench.core.executor import Executor, LocalExecutor
@@ -162,6 +163,7 @@ def materialize_project_dir(
 
     _assert_path_tokens_name(project_dir, profile, profile_dir_name)
     _assert_no_crlf(project_dir, profile)
+    _assert_no_influx_token(project_dir, runtime_profiles)
 
     # install.sh refuses a non-inert `manual` variant at fresh install. Imported
     # projects never pass through save-time validation, so this is the only
@@ -223,6 +225,25 @@ def _assert_path_tokens_name(project_dir: pathlib.Path, profile: dict, profile_d
             f"but this project deploys as '{profile_dir_name}'. install.sh keys its path rewrites "
             "on the token, so the installed configs would point at a directory that does not exist."
         )
+
+
+def _assert_no_influx_token(project_dir: pathlib.Path, runtime_profiles: dict) -> None:
+    """Deploy and bundle stage the runtime configs verbatim, and an imported
+    project never passed save-time validation, so refuse an authored token
+    here too."""
+    for variant, rel in sorted(runtime_profiles.items()):
+        if not isinstance(rel, str) or machine_profile.containment_error(rel) is not None:
+            continue
+        path = project_dir / rel
+        if not path.is_file():
+            continue
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
+            continue
+        problem = canonical.influx_token_error(doc)
+        if problem is not None:
+            raise DeployError(f"runtime variant '{variant}' ({rel}): {problem}")
 
 
 def _install_sh_config_files(project_dir: pathlib.Path, profile: dict) -> list[pathlib.Path]:

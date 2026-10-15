@@ -65,6 +65,16 @@ describe("RuntimeForm.svelte (canonical runtime config)", () => {
     // install.sh refuses this outright; catching it here beats failing at sudo.
     expect(screen.getByTestId("inertness-warning")).toBeInTheDocument();
   });
+
+  it("offers no InfluxDB token field: the runtime reads INFLUXDB_TOKEN from its environment", () => {
+    const doc = createProjectDocument("demo");
+    doc.variants[MANUAL_VARIANT].telemetry = { enabled: true, influxdb: {} };
+
+    render(RuntimeForm, { props: { doc: reactive(doc), onChanged: vi.fn() } });
+
+    expect(screen.getByText("InfluxDB bucket")).toBeInTheDocument();
+    expect(screen.queryAllByText(/token/i)).toHaveLength(0);
+  });
 });
 
 describe("ProfileForm.svelte", () => {

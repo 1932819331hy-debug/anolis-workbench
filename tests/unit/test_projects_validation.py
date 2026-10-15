@@ -13,6 +13,7 @@ import pathlib
 
 import conftest
 import pytest
+import yaml
 
 from anolis_workbench.core import canonical, machine_profile, projects
 
@@ -202,6 +203,26 @@ def test_save_project_rejects_an_off_host_bind_without_auth(_systems_root: pathl
     assert any("authentication" in err.get("message", "") for err in exc_info.value.errors)
 
 
+def test_save_project_rejects_an_authored_influx_token(_systems_root: pathlib.Path) -> None:
+    """The runtime applies INFLUXDB_TOKEN from its environment only when the
+    config's token is empty, so an authored token shadows the target's own."""
+    document = _load_template("sim-quickstart")
+    _manual(document)["telemetry"] = {"enabled": False, "influxdb": {"token": "dev-token"}}
+
+    with pytest.raises(projects.ProjectValidationError) as exc_info:
+        projects.save_project("authored-token", document)
+    messages = [err.get("message", "") for err in exc_info.value.errors]
+    assert any("INFLUXDB_TOKEN" in m and "config/anolis-runtime.manual.yaml" in m for m in messages), messages
+
+
+def test_an_empty_influx_token_is_allowed(_systems_root: pathlib.Path) -> None:
+    document = _load_template("sim-quickstart")
+    _manual(document)["telemetry"] = {"enabled": False, "influxdb": {"token": ""}}
+
+    projects.save_project("empty-token", document)
+    assert (_systems_root / "empty-token" / machine_profile.PROFILE_FILENAME).is_file()
+
+
 def test_an_off_host_bind_with_auth_is_allowed(_systems_root: pathlib.Path) -> None:
     document = _load_template("sim-quickstart")
     _manual(document)["http"]["bind"] = "0.0.0.0"
@@ -319,6 +340,69 @@ def test_migration_warnings_survive_the_first_save(_systems_root: pathlib.Path) 
     projects.save_project("legacy", document)
 
     assert any("has no kind" in w for w in projects.get_project("legacy")["warnings"])
+
+
+def _legacy_with_telemetry(systems_root: pathlib.Path, name: str) -> None:
+    """The shipped v2 template with telemetry on: its influxdb block carries
+    `token: dev-token`, which the migration used to copy."""
+    import json
+
+    legacy = json.loads((FIXTURES_ROOT / "v2-templates" / "bioreactor-manual.json").read_text(encoding="utf-8"))
+    legacy["topology"]["runtime"]["telemetry"]["enabled"] = True
+    assert legacy["topology"]["runtime"]["telemetry"]["influxdb"]["token"]
+    pdir = systems_root / name
+    pdir.mkdir(parents=True)
+    (pdir / "system.json").write_text(json.dumps(legacy), encoding="utf-8")
+
+
+def _pin_bioreactor(document: dict) -> None:
+    document["profile"]["components"] = {
+        "runtime": {"repo": "anolishq/anolis", "version": "0.1.39"},
+        "providers": {
+            "bread": {"repo": "anolishq/anolis-provider-bread", "version": "0.3.8"},
+            "ezo": {"repo": "anolishq/anolis-provider-ezo", "version": "0.3.0"},
+        },
+    }
+
+
+def test_migration_drops_a_legacy_influx_token(_systems_root: pathlib.Path) -> None:
+    _legacy_with_telemetry(_systems_root, "legacy-telemetry")
+
+    document = projects.get_project("legacy-telemetry")  # migrates in place
+    # What the migration WROTE, not the served document, which load also strips.
+    pdir = _systems_root / "legacy-telemetry"
+    rel = yaml.safe_load((pdir / machine_profile.PROFILE_FILENAME).read_text(encoding="utf-8"))["runtime_profiles"][
+        canonical.MANUAL_VARIANT
+    ]
+    influxdb = yaml.safe_load((pdir / rel).read_text(encoding="utf-8"))["telemetry"]["influxdb"]
+    assert influxdb["bucket"] == "anolis"
+    assert "token" not in influxdb
+    assert not any("INFLUXDB_TOKEN" in w for w in document["warnings"])
+
+    _pin_bioreactor(document)
+    projects.save_project("legacy-telemetry", document)
+
+
+def test_an_already_migrated_token_is_stripped_on_load_and_save_persists_it(_systems_root: pathlib.Path) -> None:
+    """A project migrated before the token was dropped has it on disk. The
+    form has no field to clear it, so loading drops it and says so; the next
+    save writes the config without it."""
+    document = _load_template("sim-quickstart")
+    _manual(document)["telemetry"] = {"enabled": True, "influxdb": {"bucket": "anolis"}}
+    projects.save_project("old-migration", document)
+    path = _systems_root / "old-migration" / "config" / "anolis-runtime.manual.yaml"
+    on_disk = yaml.safe_load(path.read_text(encoding="utf-8"))
+    on_disk["telemetry"]["influxdb"]["token"] = "dev-token"
+    path.write_text(yaml.safe_dump(on_disk, sort_keys=False), encoding="utf-8")
+
+    loaded = projects.get_project("old-migration")
+    assert "token" not in _manual(loaded)["telemetry"]["influxdb"]
+    assert any("INFLUXDB_TOKEN" in w for w in loaded["warnings"])
+
+    projects.save_project("old-migration", loaded)
+    saved = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert "token" not in saved["telemetry"]["influxdb"]
+    assert not any("INFLUXDB_TOKEN" in w for w in projects.get_project("old-migration")["warnings"])
 
 
 # ---------------------------------------------------------------------------
