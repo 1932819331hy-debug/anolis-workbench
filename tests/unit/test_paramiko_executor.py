@@ -33,18 +33,18 @@ class TestParamikoSSHExecutor:
         executor._sftp = MagicMock()
 
         mock_stdout = MagicMock()
-        mock_stdout.read.return_value = b"0.1.21\n"
+        mock_stdout.read.return_value = b"x86_64\n"
         mock_stdout.channel.recv_exit_status.return_value = 0
         mock_stderr = MagicMock()
         mock_stderr.read.return_value = b""
         mock_stdin = MagicMock()
         mock_client.exec_command.return_value = (mock_stdin, mock_stdout, mock_stderr)
 
-        result = executor.run(["anolis-runtime", "--version"])
+        result = executor.run(["uname", "-m"])
 
         assert result.returncode == 0
-        assert result.stdout == "0.1.21\n"
-        mock_client.exec_command.assert_called_once_with("anolis-runtime --version", timeout=None)
+        assert result.stdout == "x86_64\n"
+        mock_client.exec_command.assert_called_once_with("uname -m", timeout=None)
 
     @patch("anolis_workbench.core.executor.ParamikoSSHExecutor.__init__", return_value=None)
     def test_run_with_sudo(self, mock_init: MagicMock) -> None:

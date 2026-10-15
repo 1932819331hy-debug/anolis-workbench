@@ -139,6 +139,16 @@ Desktop workflows/docs:
 2. Desktop wrapper source: `desktop/src-tauri/`
 3. Desktop handoff guide: `docs/release-desktop-handoff.md`
 
+## Trust Boundary
+
+The command allowlist in `anolis_workbench/core/executor.py` guards the
+`Executor` call sites only: deploy, bundle staging, rollback, the workbench
+service, and remote probes. Dev-launch and its preflight run the runtime and
+provider binaries the user names in the project's host paths, and
+`anolis-validate --runtime-bin` runs the runtime binary it is given, directly
+and by design. Those binaries are the user's own and sit inside the trust
+boundary, so the allowlist does not list them.
+
 ## Repository Contracts
 
 1. Runtime HTTP snapshot: `contracts/runtime-http.openapi.v0.yaml`

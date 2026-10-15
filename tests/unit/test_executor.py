@@ -133,3 +133,29 @@ class TestSubprocessSSHExecutor:
         mock_run.return_value = MagicMock(returncode=1, stdout=b"", stderr=b"")
         executor = SubprocessSSHExecutor(host="pi", user="pi")
         assert executor.file_exists("/usr/local/bin/nope") is False
+
+
+class TestAllowlistBoundary:
+    """The allowlist guards Executor call sites only. Dev-launch runs the
+    user's own runtime and provider binaries with subprocess directly, and the
+    allowlist could not express a user-chosen path anyway: it keeps the
+    basename and drops the directory (#284)."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/home/me/build/anolis-runtime",
+            "/home/me/build/anolis-provider-sim",
+            "/opt/anolis/bin/anolis-provider-x",
+        ],
+    )
+    def test_runtime_and_provider_binaries_are_not_allowlisted(self, path: str) -> None:
+        from anolis_workbench.core.executor import _validate_command
+
+        with pytest.raises(ValueError, match="not in the executor allowlist"):
+            _validate_command([path, "--config", "x.yaml"])
+
+    def test_allowlist_names_no_runtime_or_provider_binary(self) -> None:
+        from anolis_workbench.core.executor import _ALLOWED_COMMANDS
+
+        assert not [c for c in _ALLOWED_COMMANDS if c.startswith("anolis-")]
