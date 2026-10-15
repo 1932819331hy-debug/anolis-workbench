@@ -511,6 +511,9 @@ def save_project(name: str, document: dict) -> None:
     sidecar["format"] = FORMAT_MACHINE_PROFILE
     sidecar["authored"] = True
     meta = _meta_of(sidecar)
+    # A project onboarding seeded stops being onboarding's once the user saves
+    # it: it then ends first-run like any project of their own (#424).
+    meta.pop("created_by", None)
     meta.setdefault("name", name)
     meta["profile_dir_name"] = document.get("profile", {}).get("machine_id") or meta.get("profile_dir_name")
     sidecar["meta"] = meta
@@ -696,6 +699,7 @@ def duplicate_project(source_name: str, new_name: str) -> dict:
             # token as well as the profile.
             canonical.retarget_project(pdir, canonical.machine_id_from_name(new_name))
         meta = _meta_of(sidecar)
+        meta.pop("created_by", None)  # a copy is the user's, not onboarding's (#424)
         meta["name"] = new_name
         meta["created"] = datetime.now(timezone.utc).isoformat()
         if canonical.is_authored(sidecar):

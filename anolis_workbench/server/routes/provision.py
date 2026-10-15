@@ -13,12 +13,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from anolis_workbench.core import deploy, installer, releases
+from anolis_workbench.core import canonical, deploy, installer, machine_profile, releases
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core.executor import ParamikoSSHExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 DEFAULT_TEMPLATE = "sim-quickstart"
+
+# Sidecar meta.created_by on a project a provision job seeded from a template
+# (Onboarding's setup cards). First-run detection ignores such a project, so a
+# failed first install keeps the way back into onboarding (#424).
+CREATED_BY_PROVISION = "onboarding"
 
 # ---------------------------------------------------------------------------
 # Job management
@@ -78,6 +83,10 @@ def _prepare_workspace(params: dict[str, Any], progress: Any, *, allow_replace: 
     if not project_dir.exists() or replace:
         progress("project", f"Creating workspace project {project} from {template}")
         installer.provision_project(template, project, prefix, force=replace)
+        sidecar = machine_profile.read_sidecar(project_dir) or {}
+        meta = sidecar.get("meta")
+        sidecar["meta"] = {**(meta if isinstance(meta, dict) else {}), "created_by": CREATED_BY_PROVISION}
+        canonical.write_sidecar(project_dir, sidecar)
     return project_dir
 
 

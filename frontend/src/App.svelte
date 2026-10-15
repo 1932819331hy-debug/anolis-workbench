@@ -242,16 +242,15 @@
         refreshStatus(),
       ]);
 
-      // Check first-run onboarding when no projects exist
-      if (projects.length === 0) {
-        try {
-          const ob = await fetchJson<{ first_run: boolean }>("/api/onboarding");
-          if (ob.first_run) {
-            showOnboarding = true;
-          }
-        } catch {
-          // Non-fatal — just show normal home
+      // First run lasts until a deploy has succeeded, whatever projects a
+      // failed attempt left behind (#424).
+      try {
+        const ob = await fetchJson<{ first_run: boolean }>("/api/onboarding");
+        if (ob.first_run) {
+          showOnboarding = true;
         }
+      } catch {
+        // Non-fatal — just show normal home
       }
 
       await navigateTo(window.location.pathname, { replaceHistory: true, bypassGuards: true });
