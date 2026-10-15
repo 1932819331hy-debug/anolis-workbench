@@ -99,6 +99,16 @@ describe("ProfileForm.svelte", () => {
     });
   });
 
+  it("names no release in the pin placeholders, so they cannot go stale", () => {
+    const doc = createProjectDocument("demo");
+    withProvider(doc, "bread0", "bread", {});
+    render(ProfileForm, { props: { doc: reactive(doc), onChanged: vi.fn() } });
+
+    for (const label of ["Runtime version", "bread version"]) {
+      expect(screen.getByLabelText(label).getAttribute("placeholder")).not.toMatch(/\d/);
+    }
+  });
+
   it("does not let the machine_id be edited", () => {
     const doc = reactive(createProjectDocument("demo"));
     render(ProfileForm, { props: { doc, onChanged: vi.fn() } });

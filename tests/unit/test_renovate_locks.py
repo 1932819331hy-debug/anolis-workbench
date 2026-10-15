@@ -15,9 +15,11 @@ import pathlib
 import re
 
 import pytest
+import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 LOCKS = sorted((REPO_ROOT / "contracts" / "upstream").rglob("*.lock.json"))
+TEMPLATES = sorted((REPO_ROOT / "anolis_workbench" / "templates").glob("*/machine-profile.yaml"))
 
 
 def _js_regex(pattern: str) -> re.Pattern[str]:
@@ -62,3 +64,27 @@ def test_every_lock_tag_is_tracked(lock: pathlib.Path) -> None:
         (data["distribution"]["release"]["repo"], data["distribution"]["release"]["tag"].removeprefix("v")),
     ]
     assert found == expected
+
+
+def test_there_are_templates_to_track() -> None:
+    assert TEMPLATES
+
+
+@pytest.mark.parametrize("profile", TEMPLATES, ids=lambda p: p.relative_to(REPO_ROOT).as_posix())
+def test_every_template_runtime_pin_is_tracked(profile: pathlib.Path) -> None:
+    """Onboarding deploys these templates, so a stale runtime pin installs an
+    old runtime, or downgrades an installed one (#470)."""
+    rel_path = profile.relative_to(REPO_ROOT).as_posix()
+    managers = _managers_for(rel_path)
+    assert managers, f"no Renovate custom manager covers {rel_path}"
+
+    text = profile.read_text(encoding="utf-8")
+    found: list[tuple[str, str]] = []
+    for manager in managers:
+        assert manager["datasourceTemplate"] == "github-releases"
+        for pattern in manager["matchStrings"]:
+            for match in _js_regex(pattern).finditer(text):
+                found.append((match.group("depName"), match.group("currentValue")))
+
+    runtime = yaml.safe_load(text)["components"]["runtime"]
+    assert found == [(runtime["repo"], str(runtime["version"]))]

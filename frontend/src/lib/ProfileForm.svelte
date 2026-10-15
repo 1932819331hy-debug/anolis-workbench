@@ -162,7 +162,7 @@
       type="text"
       spellcheck="false"
       style="font-family:monospace"
-      placeholder="0.1.39"
+      placeholder="MAJOR.MINOR.PATCH"
       value={profile?.components?.runtime?.version ?? ""}
       oninput={(e: Event) => setRuntimePin(inputTarget(e).value)}
     />
@@ -198,7 +198,7 @@
         type="text"
         spellcheck="false"
         style="font-family:monospace"
-        placeholder="0.3.8"
+        placeholder="MAJOR.MINOR.PATCH"
         value={profile?.components?.providers?.[kind]?.version ?? ""}
         oninput={(e: Event) => setProviderPin(kind, inputTarget(e).value)}
       />

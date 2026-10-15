@@ -11,6 +11,16 @@
       ],
       "datasourceTemplate": "github-releases",
       "extractVersionTemplate": "^v?(?<version>.+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the runtime release each bundled template pins, so Onboarding never deploys a stale runtime. See anolishq/anolis-workbench#470.",
+      "managerFilePatterns": ["/^anolis_workbench/templates/[^/]+/machine-profile\\.yaml$/"],
+      "matchStrings": [
+        "\\n  runtime:[ \\t]*\\n[ \\t]+repo:[ \\t]*(?<depName>[^\\s]+)[ \\t]*\\n[ \\t]+version:[ \\t]*(?<currentValue>[^\\s]+)"
+      ],
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v?(?<version>.+)$"
     }
   ],
   "packageRules": [
