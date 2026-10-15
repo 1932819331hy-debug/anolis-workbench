@@ -86,10 +86,9 @@
   }
 
   /**
-   * Seed a fresh native config for a kind: schema defaults/consts, the
-   * provider instance name set to the id, and discovery.mode prefilled to
-   * "manual" when the schema offers a mode choice (the composer's authoring
-   * baseline; scan stays one select away).
+   * Seed a fresh native config for a kind: the schema's own defaults/consts,
+   * and the provider instance name set to the id. A field the schema gives no
+   * default stays unset until the user picks a value.
    */
   function seedConfig(kind: string, id: string): UnknownRecord {
     const schema = envelopeSchema(kind);
@@ -101,13 +100,6 @@
       const provider = asObject(config.provider) ?? {};
       provider.name = id;
       config.provider = provider;
-    }
-
-    const discoverySchema = asObject(schemaProps.discovery);
-    if (discoverySchema && properties(discoverySchema).some(([k]) => k === "mode")) {
-      const discovery = asObject(config.discovery) ?? {};
-      if (discovery.mode === undefined) discovery.mode = "manual";
-      config.discovery = discovery;
     }
     return config;
   }
@@ -151,9 +143,13 @@
     if (compat) delete compat[id];
   }
 
+  // Add-Provider asks for a kind and offers no default.
+  let newKind = $state("");
+
   function addProvider(): void {
-    if (kinds.length === 0) return;
-    const kind = kinds.includes("sim") ? "sim" : kinds[0];
+    const kind = newKind;
+    if (!kinds.includes(kind)) return;
+    newKind = "";
     const id = genId(kind);
 
     declare(id, kind);
@@ -477,7 +473,24 @@
     {/each}
   </div>
 
-  <button type="button" class="btn-add-provider" onclick={addProvider} disabled={kinds.length === 0}
-    >+ Add Provider</button
-  >
+  <div class="provider-add">
+    <select
+      class="provider-add-kind"
+      aria-label="Kind for the new provider"
+      value={newKind}
+      onchange={(e: Event) => (newKind = inputTarget(e).value)}
+      disabled={kinds.length === 0}
+    >
+      <option value="" disabled>Choose a kind…</option>
+      {#each kinds as k (k)}
+        <option value={k}>{kindLabels[k] ?? k}</option>
+      {/each}
+    </select>
+    <button
+      type="button"
+      class="btn-add-provider"
+      onclick={addProvider}
+      disabled={!kinds.includes(newKind)}>+ Add Provider</button
+    >
+  </div>
 </section>

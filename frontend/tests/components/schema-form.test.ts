@@ -11,7 +11,10 @@ import { reactive } from "./helpers.svelte";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 function loadSchema(kind: string): UnknownRecord {
-  const path = resolve(HERE, `../../../anolis_workbench/schemas/providers/${kind}.config-schema.json`);
+  const path = resolve(
+    HERE,
+    `../../../anolis_workbench/schemas/providers/${kind}.config-schema.json`,
+  );
   const envelope = JSON.parse(readFileSync(path, "utf-8")) as UnknownRecord;
   return envelope.schema as UnknownRecord;
 }
@@ -40,6 +43,19 @@ describe("SchemaForm.svelte (bread envelope)", () => {
     expect(screen.getByRole("option", { name: "Scan the bus" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "RLHT Heater" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("mock://bus")).toBeInTheDocument();
+  });
+
+  it("adds no note of its own to a bus path; the schema's placeholder carries the hint", () => {
+    for (const busPath of ["mock://bus", "/dev/i2c-1"]) {
+      const config = breadConfig();
+      (config.hardware as UnknownRecord).bus_path = busPath;
+      const { unmount } = render(SchemaForm, {
+        props: { schema: breadSchema, value: config, onChanged: vi.fn() },
+      });
+      expect(screen.getByDisplayValue(busPath)).toBeInTheDocument();
+      expect(screen.queryByText(/Mock bus mode|Live hardware path/)).toBeNull();
+      unmount();
+    }
   });
 
   it("switching discovery mode to scan hides AND prunes addresses", async () => {

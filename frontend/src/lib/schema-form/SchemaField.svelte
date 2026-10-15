@@ -102,15 +102,6 @@
     const parsed = parseI2c(text);
     commit(parsed !== null ? parsed : text);
   }
-
-  function busNote(path: string): { cls: string; text: string } {
-    return path.startsWith("mock://")
-      ? { cls: "bus-note note-success", text: "Mock bus mode — no hardware required." }
-      : {
-          cls: "bus-note note-warning",
-          text: "Live hardware path — requires the bus to be connected.",
-        };
-  }
 </script>
 
 {#if isArray}
@@ -217,10 +208,6 @@
       value={typeof value === "string" ? value : ""}
       oninput={(e: Event) => commit(inputTarget(e).value || undefined)}
     />
-    {#if key === "bus_path" && typeof value === "string" && value !== ""}
-      {@const note = busNote(value)}
-      <div class={note.cls}>{note.text}</div>
-    {/if}
     {#if description}<span class="field-note">{description}</span>{/if}
     {#if error}<span class="field-error">{error}</span>{/if}
   </div>

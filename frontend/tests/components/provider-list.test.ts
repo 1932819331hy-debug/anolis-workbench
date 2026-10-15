@@ -1,7 +1,7 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
 
 import { AUTOMATION_VARIANT, MANUAL_VARIANT, variantRelpath } from "../../src/lib/canonical";
@@ -12,14 +12,33 @@ import type {
   UnknownRecord,
 } from "../../src/lib/contracts";
 import ProviderList from "../../src/lib/ProviderList.svelte";
+import { asObject, defaultsFor } from "../../src/lib/schema-form/schema";
 import { createProjectDocument, withProvider } from "./helpers";
 import { reactive } from "./helpers.svelte";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 function loadEnvelope(kind: string): ProviderSchemaEnvelope {
-  const path = resolve(HERE, `../../../anolis_workbench/schemas/providers/${kind}.config-schema.json`);
+  const path = resolve(
+    HERE,
+    `../../../anolis_workbench/schemas/providers/${kind}.config-schema.json`,
+  );
   return JSON.parse(readFileSync(path, "utf-8")) as ProviderSchemaEnvelope;
+}
+
+// Every vendored envelope, globbed rather than named, so a new provider is
+// covered without editing this file.
+const ENVELOPE_DIR = resolve(HERE, "../../../anolis_workbench/schemas/providers");
+const VENDORED_KINDS = readdirSync(ENVELOPE_DIR)
+  .filter((f) => f.endsWith(".config-schema.json"))
+  .map((f) => f.replace(/\.config-schema\.json$/, ""))
+  .sort();
+
+function allSchemasResponse(): ProviderSchemasResponse {
+  return {
+    schema_version: 1,
+    providers: Object.fromEntries(VENDORED_KINDS.map((kind) => [kind, loadEnvelope(kind)])),
+  };
 }
 
 function schemasResponse(): ProviderSchemasResponse {
@@ -68,7 +87,10 @@ describe("ProviderList.svelte", () => {
       props: { doc: docWithSim(), providerSchemas: schemasResponse(), onChanged: vi.fn() },
     });
 
-    expect(screen.getByRole("option", { name: "anolis-provider-sim" })).toBeInTheDocument();
+    const kindSelect = document.querySelector(".provider-kind-select") as HTMLSelectElement;
+    expect(
+      within(kindSelect).getByRole("option", { name: "anolis-provider-sim" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Configure")).toBeInTheDocument();
     expect(screen.getByText("Startup policy")).toBeInTheDocument();
     expect(screen.getByText("Simulation mode")).toBeInTheDocument();
@@ -92,7 +114,9 @@ describe("ProviderList.svelte", () => {
       timeout_ms: 100,
       retry_count: 2,
     });
-    expect(entry.config.discovery).toEqual({ mode: "manual" });
+    // No prefilled discovery mode: the schema declares no default, so it stays
+    // unset until the user picks one.
+    expect(entry.config.discovery).toEqual({});
     expect(entry.config.devices).toEqual([]);
 
     // The command token, the config path token and the profile must all move
@@ -122,6 +146,9 @@ describe("ProviderList.svelte", () => {
       props: { doc, providerSchemas: schemasResponse(), onChanged },
     });
 
+    await fireEvent.change(screen.getByRole("combobox", { name: "Kind for the new provider" }), {
+      target: { value: "sim" },
+    });
     await fireEvent.click(screen.getByRole("button", { name: "+ Add Provider" }));
 
     const entry = doc.providers.sim0;
@@ -138,6 +165,52 @@ describe("ProviderList.svelte", () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
+  it("add provider offers no default kind and cannot submit until one is chosen", async () => {
+    const doc = reactive(createProjectDocument("demo"));
+    render(ProviderList, {
+      props: { doc, providerSchemas: allSchemasResponse(), onChanged: vi.fn() },
+    });
+
+    const kindSelect = screen.getByRole("combobox", {
+      name: "Kind for the new provider",
+    }) as HTMLSelectElement;
+    const add = screen.getByRole("button", { name: "+ Add Provider" });
+    expect(kindSelect.value).toBe("");
+    expect(add).toBeDisabled();
+
+    await fireEvent.click(add);
+    expect(Object.keys(doc.providers ?? {})).toEqual([]);
+  });
+
+  it.each(VENDORED_KINDS)(
+    "add provider seeds a %s config from its schema's own defaults",
+    async (kind) => {
+      const doc = reactive(createProjectDocument("demo"));
+      const schemas = allSchemasResponse();
+      render(ProviderList, { props: { doc, providerSchemas: schemas, onChanged: vi.fn() } });
+
+      const kindSelect = screen.getByRole("combobox", {
+        name: "Kind for the new provider",
+      }) as HTMLSelectElement;
+      await fireEvent.change(kindSelect, { target: { value: kind } });
+      await fireEvent.click(screen.getByRole("button", { name: "+ Add Provider" }));
+
+      const id = `${kind}0`;
+      expect(doc.providers[id].kind).toBe(kind);
+      const schema = asObject(schemas.providers[kind].schema)!;
+      const expected = defaultsFor(schema);
+      // The instance name is the one value seeding adds beyond the schema's own.
+      if (asObject(asObject(schema.properties)?.provider)) {
+        expected.provider = { ...(asObject(expected.provider) ?? {}), name: id };
+      }
+      expect(doc.providers[id].config).toEqual(expected);
+
+      // The next provider needs its own explicit choice.
+      expect(kindSelect.value).toBe("");
+      expect(screen.getByRole("button", { name: "+ Add Provider" })).toBeDisabled();
+    },
+  );
+
   it("remove drops the provider from EVERY variant, not just the edited one", async () => {
     const doc = createProjectDocument("demo");
     doc.profile.runtime_profiles[AUTOMATION_VARIANT] = variantRelpath(AUTOMATION_VARIANT);
@@ -146,7 +219,13 @@ describe("ProviderList.svelte", () => {
       automation: { enabled: true },
     };
     withProvider(doc, "sim0", "sim", { provider: { name: "sim0" } });
-    withProvider(doc, "sim0b", "sim", { provider: { name: "sim0b" } }, { variant: AUTOMATION_VARIANT });
+    withProvider(
+      doc,
+      "sim0b",
+      "sim",
+      { provider: { name: "sim0b" } },
+      { variant: AUTOMATION_VARIANT },
+    );
     // The automation variant runs sim0 too.
     doc.variants[AUTOMATION_VARIANT].providers = [
       ...(doc.variants[AUTOMATION_VARIANT].providers ?? []),

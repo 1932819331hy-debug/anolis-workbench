@@ -46,9 +46,7 @@
   const objectMode = $derived(items !== null && isObjectSchema(items));
   const value = $derived(Array.isArray(parent[key]) ? (parent[key] as unknown[]) : null);
   const violations = $derived(uniqueViolations(schema, value ?? []));
-  const showImport = $derived(
-    i2cImport !== null && items !== null && isI2cField(items) && key !== "devices",
-  );
+  const showImport = $derived(i2cImport !== null && items !== null && isI2cField(items));
 
   function inputTarget(event: Event): HTMLInputElement {
     return event.currentTarget as HTMLInputElement;
