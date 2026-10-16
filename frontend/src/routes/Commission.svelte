@@ -721,7 +721,7 @@
 
       {#if preflightResults?.checks?.length}
         <div class="preflight-results">
-          {#each preflightResults.checks as c (c.name)}
+          {#each preflightResults.checks as c, i (i)}
             {@const cls = c.ok === true ? "check-ok" : c.ok === false ? "check-fail" : "check-skip"}
             {@const icon = c.ok === true ? "✓" : c.ok === false ? "✗" : "–"}
             <div class="check-item {cls}">

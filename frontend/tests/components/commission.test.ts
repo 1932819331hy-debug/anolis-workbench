@@ -86,6 +86,41 @@ describe('Commission.svelte', () => {
     expect(screen.getByRole('button', { name: /Launch/ })).toBeEnabled();
   });
 
+  it('lists every validation error when several share a check name', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = pathFromInput(input);
+      if (path === '/api/projects/demo/preflight') {
+        return jsonResponse(200, {
+          ok: false,
+          // launcher.preflight emits one same-named check per validation error.
+          checks: [
+            { name: 'System-level validation', ok: false, error: 'first error', hint: null },
+            { name: 'System-level validation', ok: false, error: 'second error', hint: null },
+          ],
+          summary: { passed: 0, skipped: 0, failed: 2 },
+        });
+      }
+      return jsonResponse(200, {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(Commission, {
+      props: {
+        projectName: 'demo',
+        system: createProjectDocument('demo'),
+        runtimeStatus: createRuntimeStatus(),
+        commissionRunningForCurrent: false,
+      },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Preflight Check' }));
+
+    expect(await screen.findByText('0 passed · 0 skipped · 2 failed')).toBeInTheDocument();
+    expect(screen.getByText('first error')).toBeInTheDocument();
+    expect(screen.getByText('second error')).toBeInTheDocument();
+    expect(screen.getAllByText('System-level validation')).toHaveLength(2);
+  });
+
   it('builds the bundle for the architecture the user chose', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { job_id: 'job-1' }));
     vi.stubGlobal('fetch', fetchMock);
