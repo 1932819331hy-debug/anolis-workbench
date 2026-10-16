@@ -1,8 +1,8 @@
 # Commissioning Handoff Runbook
 
 Status: Active.
-Audience: Machine integrators commissioning in Workbench and handing off to
-headless runtime deployment.
+Audience: Machine integrators commissioning in Workbench and handing a
+machine off for deployment with the runtime's `install.sh`.
 
 ## 1) Preconditions
 
@@ -10,7 +10,59 @@ headless runtime deployment.
 2. Operate checks are complete for target behavior.
 3. Runtime contracts and Workbench tests are green locally.
 
-## 2) Export Package
+## 2) Three Artifacts, Three Roles
+
+A commissioned machine is carried by three artifacts. They compose; none
+replaces another.
+
+1. **Machine-profile project** (`machine-profile.yaml` and the configs it
+   references): the source of truth. It is what you author and commission
+   in the workbench.
+2. **Handoff package** (`.anpkg`, optional): a provenance record of what
+   was commissioned and validated. It is never a step on the install path.
+3. **Staged bundle** (an `anolis-*.tar.gz` from `install.sh --stage`):
+   the deployable. It carries the runtime, the providers, the project's
+   configs and every runtime variant, and `install.sh --local` installs it
+   on the target as a systemd service.
+
+## 3) Deploy
+
+The runtime's `install.sh` performs every deploy. Each path below installs
+binaries, providers, configs and the systemd service.
+
+Facility path (air-gapped baseline): stage a bundle, carry it to the target
+(USB or any offline transfer), and install it there.
+
+```bash
+anolis-provision bundle --project <project-name> --arch arm64 --out <dir>
+```
+
+Commission's bundle export builds the same bundle. On the target, as
+`anolis-provision bundle` prints:
+
+```bash
+sudo ./install.sh --local <bundle>.tar.gz
+```
+
+Online convenience path: when the target can reach the GitHub release
+downloads, deploy straight from the workbench, with Commission's Deploy to
+device or:
+
+```bash
+anolis-provision install --project <project-name>
+anolis-provision remote --target user@host --project <project-name>
+```
+
+These run `install.sh --project` on the target, which downloads the runtime
+and provider releases from GitHub there. For `remote`, the machine running
+the workbench must reach GitHub as well (it fetches `install.sh` and copies
+it over SSH). They are a convenience over the facility path, not a
+replacement for it.
+
+On a target that already has a runtime or provider config, `install.sh`
+keeps it in place and the deploy result says so.
+
+## 4) Export Package (Provenance Record)
 
 Workbench path:
 
@@ -24,7 +76,7 @@ CLI path:
 anolis-package <project-name> [output.anpkg]
 ```
 
-## 3) Validate Package
+## 5) Validate Package
 
 Static package validation:
 
@@ -40,52 +92,49 @@ python3 contracts/validate-handoff-packages.py \
   --runtime-bin <path-to-anolis-runtime>
 ```
 
-## 4) Deploy and Replay from Clean Directory
-
-1. Create fresh deployment directory on target host.
-2. Copy package archive.
-3. Extract package:
-
-```bash
-unzip <machine>.anpkg -d /opt/anolis/<machine>
-```
-
-1. Configure deploy-time secret(s), minimally:
+Manual replay, as a validation step only: extract the package into a
+scratch directory and start a runtime against it. This checks that the
+package is self-contained. It does not deploy: nothing is installed, no
+service is created, and the target's `/opt/anolis` is not touched.
 
 ```bash
-export INFLUXDB_TOKEN='<token-value>'
-```
-
-1. Start runtime from extracted package root:
-
-```bash
-cd /opt/anolis/<machine>
+unzip <machine>.anpkg -d <scratch-dir>
+cd <scratch-dir>
+export INFLUXDB_TOKEN='<token-value>'   # only if telemetry is enabled
 <path-to-anolis-runtime> --config runtime/anolis-runtime.yaml
 ```
 
 Expected: runtime loads config and providers without dependency on
 `systems/<project>/`.
 
-## 5) Operator Handoff Package Contents
+## 6) Operator Handoff Package Contents
 
 Deliver all of:
 
-1. `.anpkg` artifact
-2. Runtime/provider binary provenance (build IDs/refs)
-3. Validation output (`validate-handoff-packages.py` logs)
-4. Mode/operation checklist used during commissioning
-5. Deployment env requirements (`INFLUXDB_TOKEN` policy)
+1. The staged bundle that was deployed
+2. `.anpkg` artifact, as the provenance record
+3. Runtime/provider binary provenance (build IDs/refs)
+4. Validation output (`validate-handoff-packages.py` logs)
+5. Mode/operation checklist used during commissioning
+6. Deployment env requirements (`INFLUXDB_TOKEN` policy)
 
-## 6) Rollback Guidance
+## 7) Rollback Guidance
 
-1. Keep prior known-good `.anpkg` artifact in deployment storage.
-2. If new package replay fails:
-   - stop runtime
-   - redeploy previous package archive
-   - restart runtime with previous package config
+1. Keep the prior known-good bundle and its `.anpkg` in deployment
+   storage. The `.anpkg` records the configs that rollout shipped.
+2. If a new rollout fails, restore the previous binaries on the target:
+
+   ```bash
+   anolis-provision rollback --target user@host
+   ```
+
+   Omit `--target` on the target itself. This runs `install.sh
+   --rollback`, which swaps the previous binaries (and their
+   `manifest.json`) back and restarts the service. It does not revert
+   runtime or provider configs; they stay as they are on the target.
 3. Record failure cause and attach validation output before next rollout attempt.
 
-## 7) Troubleshooting
+## 8) Troubleshooting
 
 1. Checksum mismatch:
    - Artifact tampered/corrupted after export.

@@ -65,6 +65,13 @@ anolis-validate <package.anpkg>
 python contracts/validate-handoff-packages.py <package.anpkg>
 ```
 
+A handoff package is a provenance record of what was commissioned, not a
+deploy step. A machine is deployed by the runtime's `install.sh`: stage an
+offline bundle with `anolis-provision bundle` and install it on the target
+with `install.sh --local`, or deploy online with `anolis-provision
+install|remote`. The roles and both paths are in
+`docs/commissioning-handoff-runbook.md`.
+
 Provision with observability (InfluxDB + Grafana installed natively on the
 target by the runtime's `install.sh --with-observability`):
 

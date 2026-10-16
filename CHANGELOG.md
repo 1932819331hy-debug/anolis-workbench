@@ -29,6 +29,16 @@ Historical note:
   every kind; how a provider is built is the provider's to document. A
   kind with no vendored envelope gets a hint to set the binary's Executable
   path in Compose.
+- The commissioning handoff runbook describes one deploy story (closes
+  #240): the machine-profile project is the source of truth, the `.anpkg`
+  is an optional provenance record, and the staged bundle is the
+  deployable. It documents the facility path (`anolis-provision bundle`,
+  then `install.sh --local` on the target) and the online path
+  (`anolis-provision install|remote`). Extracting an `.anpkg` and running
+  the runtime against it is a validation step, done in a scratch
+  directory, and no longer reads as a deploy into `/opt/anolis`. The online
+  path needs the target to reach the GitHub release downloads. The handoff
+  package v1 format doc states the same purpose; the format is unchanged.
 
 ### Fixed
 

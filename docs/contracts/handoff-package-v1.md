@@ -4,8 +4,8 @@ Status: Active baseline.
 
 ## Purpose
 
-Define the deterministic package format produced by commissioning for
-headless runtime deployment.
+Define the deterministic package format produced by commissioning as a
+provenance record of the commissioned machine; it is not a deploy artifact.
 
 ## Distribution Form
 
