@@ -34,10 +34,10 @@ compatibility:
   providers:
     bread0:
       strategy: pinned-ref
-      version: "0.5.0"
+      version: "0.5.2"
     ezo0:
       strategy: pinned-ref
-      version: "0.4.0"
+      version: "0.4.1"
 
 components:
   runtime:
@@ -46,10 +46,10 @@ components:
   providers:
     bread:
       repo: anolishq/anolis-provider-bread
-      version: "0.5.0"
+      version: "0.5.2"
     ezo:
       repo: anolishq/anolis-provider-ezo
-      version: "0.4.0"
+      version: "0.4.1"
   optional:
     telemetry_export:
       package: anolis-telemetry-export

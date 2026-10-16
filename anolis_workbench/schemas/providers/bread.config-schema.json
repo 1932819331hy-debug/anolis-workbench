@@ -1,7 +1,7 @@
 {
   "config_schema_version": 1,
   "provider": "anolis-provider-bread",
-  "provider_version": "0.5.0",
+  "provider_version": "0.5.2",
   "schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -82,7 +82,8 @@
                 "const": "manual",
                 "title": "Manual address list"
               }
-            ]
+            ],
+            "default": "manual"
           },
           "addresses": {
             "type": "array",

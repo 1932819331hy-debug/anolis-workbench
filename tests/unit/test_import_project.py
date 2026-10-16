@@ -171,7 +171,7 @@ def test_skew_on_an_imported_rig_is_derived_and_never_recorded(
     """
     profile = source_dir / "machine-profile.yaml"
     profile.write_text(
-        profile.read_text(encoding="utf-8").replace('version: "0.5.0"', 'version: "0.3.6"'),
+        profile.read_text(encoding="utf-8").replace('version: "0.5.2"', 'version: "0.3.6"'),
         encoding="utf-8",
     )
 

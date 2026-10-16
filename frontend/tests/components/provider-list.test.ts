@@ -114,9 +114,8 @@ describe("ProviderList.svelte", () => {
       timeout_ms: 100,
       retry_count: 2,
     });
-    // No prefilled discovery mode: the schema declares no default, so it stays
-    // unset until the user picks one.
-    expect(entry.config.discovery).toEqual({});
+    // The schema declares discovery.mode's default, so it is prefilled.
+    expect(entry.config.discovery).toEqual({ mode: "manual" });
     expect(entry.config.devices).toEqual([]);
 
     // The command token, the config path token and the profile must all move
