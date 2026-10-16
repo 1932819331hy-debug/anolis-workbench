@@ -6,8 +6,11 @@ the workbench UI on boot, making it accessible from any LAN device.
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
+import sysconfig
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from textwrap import dedent
@@ -49,11 +52,23 @@ class WorkbenchServiceResult:
     error: str | None = None
 
 
+def invoking_user() -> str:
+    """The user who ran the command: SUDO_USER under sudo, else USER."""
+    return os.environ.get("SUDO_USER") or os.environ.get("USER") or "root"
+
+
 def _find_workbench_executable() -> str:
-    """Locate the anolis-workbench entry point."""
+    """Locate the anolis-workbench entry point as an absolute path.
+
+    The running install's own scripts dir comes first: under sudo, PATH is
+    secure_path and holds no pipx or venv bin dir.
+    """
+    beside = os.path.join(sysconfig.get_path("scripts"), "anolis-workbench")
+    if os.path.isfile(beside):
+        return os.path.abspath(beside)
     which = shutil.which("anolis-workbench")
     if which:
-        return which
+        return os.path.abspath(which)
     # Fallback: use the current Python interpreter with module invocation
     return f"{sys.executable} -m anolis_workbench.cli.main"
 
@@ -67,6 +82,13 @@ def render_unit_file(user: str, executable: str | None = None) -> str:
     """
     exec_start = executable or _find_workbench_executable()
     return _UNIT_FILE.format(user=user, exec_start=exec_start)
+
+
+def _sudo(exe: Executor, cmd: list[str]) -> None:
+    result = exe.run(cmd, sudo=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise OSError(f"sudo {' '.join(cmd)} failed (exit {result.returncode}): {detail}")
 
 
 def install_service(
@@ -87,10 +109,16 @@ def install_service(
     unit_path = _SYSTEMD_UNIT_DIR / SERVICE_NAME
 
     try:
-        exe.write_file(str(unit_path), unit_content.encode())
-        exe.run(["systemctl", "daemon-reload"], sudo=True)
-        exe.run(["systemctl", "enable", SERVICE_NAME], sudo=True)
-        exe.run(["systemctl", "restart", SERVICE_NAME], sudo=True)
+        # Staged in a private temp dir, then copied into place under sudo:
+        # the unit dir is root's, and the caller is usually not.
+        with tempfile.TemporaryDirectory(prefix="anolis-workbench-unit-") as td:
+            staged = os.path.join(td, SERVICE_NAME)
+            exe.write_file(staged, unit_content.encode())
+            _sudo(exe, ["cp", staged, str(unit_path)])
+        _sudo(exe, ["chmod", "0644", str(unit_path)])
+        _sudo(exe, ["systemctl", "daemon-reload"])
+        _sudo(exe, ["systemctl", "enable", SERVICE_NAME])
+        _sudo(exe, ["systemctl", "restart", SERVICE_NAME])
     except Exception as exc:
         return WorkbenchServiceResult(installed=False, enabled=False, started=False, error=str(exc))
 

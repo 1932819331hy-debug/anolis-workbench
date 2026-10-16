@@ -430,8 +430,6 @@ def _print_observability(
 
 def _run_install(args: argparse.Namespace) -> int:
     """Execute the install subcommand: author the workspace, deploy via install.sh."""
-    import os
-
     if not _validate_system_template(args):
         return 1
 
@@ -475,13 +473,16 @@ def _run_install(args: argparse.Namespace) -> int:
         from anolis_workbench.core import workbench_service
 
         _print_progress("systemd", "Installing workbench systemd service")
-        wb_result = workbench_service.install_service(
-            user=os.environ.get("USER", "root"),
-        )
+        wb_result = workbench_service.install_service(user=workbench_service.invoking_user())
         if wb_result.error:
-            print(f"\nWARNING: workbench service: {wb_result.error}", file=sys.stderr)
-        else:
-            _print_progress("systemd", "Workbench service enabled and started")
+            print(
+                f"\nERROR: workbench service: {wb_result.error}\n"
+                f"The runtime is installed (anolis-runtime v{result.runtime_version}); "
+                "the workbench service is not.",
+                file=sys.stderr,
+            )
+            return 1
+        _print_progress("systemd", "Workbench service enabled and started")
 
     # Print summary
     print()

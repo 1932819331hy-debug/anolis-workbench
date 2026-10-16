@@ -18,6 +18,13 @@ Historical note:
 - Commission's preflight panel lists every system-level validation error
   (closes #405). With two or more it threw `each_key_duplicate` and showed
   nothing, because every error is a check with the same name.
+- `anolis-provision install --workbench-service` installs the service.
+  It wrote the unit into `/etc/systemd/system` without sudo, so a
+  non-root run printed a warning, installed nothing and still reported
+  success. The unit is now copied into place with sudo, the service
+  runs as the invoking user (`SUDO_USER` under sudo, not root), and
+  `ExecStart=` is the running install's own `anolis-workbench`. A
+  failed step now fails the install with exit 1.
 
 ## [0.16.0] - 2026-10-16
 
