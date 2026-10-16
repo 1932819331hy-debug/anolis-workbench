@@ -50,14 +50,18 @@ Desktop job flow:
    `.dmg`).
 5. `sbom` — Syft CycloneDX SBOMs for the Python, Node and Rust trees. This job
    is `continue-on-error: true`, which keeps a failed SBOM from failing the
-   run. `create-release` needs it, though, and GitHub documents that a failed
-   job skips the jobs that need it without saying whether `continue-on-error`
-   changes that. Treat a failed `sbom` as possibly blocking `create-release`,
-   and check the SBOM assets (below).
-6. `create-release` — normalize asset names, push the `v<version>` tag, and
-   create the GitHub Release with the wheel and sdist, the installers, the
-   SBOMs and `metrics.json`. It needs `validate`, `build-python`,
-   `smoke-test`, `package-desktop`, `sbom` and `metrics`.
+   run. `attest` needs it, though, and GitHub documents that a failed job
+   skips the jobs that need it without saying whether `continue-on-error`
+   changes that. Treat a failed `sbom` as possibly blocking `attest` and
+   everything after it, PyPI included, and check the SBOM assets (below).
+6. `attest` — normalize asset names and attest build provenance for every
+   file the release attaches: the wheel and sdist, the installers, the SBOMs
+   and `metrics.json`. It needs `validate`, `build-python`,
+   `package-desktop`, `sbom` and `metrics`, and `publish-pypi` needs it, so
+   nothing is published until every asset is built and attested.
+7. `create-release` — push the `v<version>` tag and create the GitHub
+   Release with the attested assets. It needs `validate`, `smoke-test` and
+   `attest`.
 
 ## Sidecar Freeze Guards
 
@@ -78,14 +82,16 @@ Desktop job flow:
    - Linux `.AppImage` and `.deb`
    - macOS `.dmg` (aarch64 and x64)
    - CycloneDX SBOM JSON files
+4. Verify any downloaded asset's provenance:
+   `gh attestation verify <asset> -R anolishq/anolis-workbench`.
 
 ## Notes
 
 1. macOS is built in the same `package-desktop` matrix as Windows and Linux,
    so a failed macOS leg fails that job and `create-release` does not run.
-2. `publish-pypi` needs only `validate` and `build-python`, so it runs
-   alongside the desktop jobs and never waits for them. A desktop failure does
-   not stop the PyPI publish: the version can land on PyPI with no tag and no
+2. `publish-pypi` needs `attest`, so a desktop or attestation failure stops
+   the run before the PyPI publish. A failure after it (`smoke-test`,
+   `create-release`) can still leave the version on PyPI with no tag and no
    GitHub Release. Re-running the workflow for the same version recovers —
    no tag exists yet, so `validate` passes, and the publish step uses
    `skip-existing: true`.

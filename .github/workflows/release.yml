@@ -171,7 +171,7 @@ jobs:
   # =========================================================================
   publish-pypi:
     name: Publish to PyPI
-    needs: [validate, build-python]
+    needs: [validate, build-python, attest]
     runs-on: ubuntu-24.04
     environment:
       name: pypi
@@ -468,20 +468,19 @@ jobs:
           retention-days: 14
 
   # =========================================================================
-  # 10. Create GitHub Release with ALL assets
+  # 10. Name and attest the release assets
   # =========================================================================
-  create-release:
-    name: Create GitHub Release
-    needs: [validate, build-python, smoke-test, package-desktop, sbom, metrics]
+  # publish-pypi and create-release both need this job, so a failed build,
+  # SBOM or attestation stops the run before anything irreversible.
+  attest:
+    name: Attest release assets
+    needs: [validate, build-python, package-desktop, sbom, metrics]
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
+      id-token: write
+      attestations: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-
       - name: Download Python dist artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -554,6 +553,52 @@ jobs:
 
           echo "=== Release assets ==="
           ls -lh release-assets/
+
+      # The same paths as create-release's `files:`, so every attached asset
+      # carries a build-provenance attestation (#126).
+      - name: Attest release assets
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+            release-assets/anolis-workbench-*
+            release-assets/sbom-*
+            metrics-out/metrics.json
+
+      - name: Upload attested release assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-assets
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            release-assets/anolis-workbench-*
+            release-assets/sbom-*
+            metrics-out/metrics.json
+          if-no-files-found: error
+          retention-days: 14
+
+  # =========================================================================
+  # 11. Create GitHub Release with ALL assets
+  # =========================================================================
+  create-release:
+    name: Create GitHub Release
+    needs: [validate, smoke-test, attest]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Download attested release assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: release-assets
+          path: .
 
       - name: Create and push release tag
         run: |

@@ -47,7 +47,8 @@ A release is accepted only when all of the following are true:
 2. Requested version equals `pyproject.toml` `project.version`
 3. Target tag (`v<version>`) does not already exist
 4. Reusable CI gate passes
-5. Build artifacts are created successfully
+5. Build artifacts are created, and every GitHub release asset gets a
+   build-provenance attestation, before anything is published
 6. PyPI publish succeeds (OIDC trusted publishing)
 7. Clean-install smoke checks pass
 

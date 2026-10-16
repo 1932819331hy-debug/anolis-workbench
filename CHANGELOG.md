@@ -35,6 +35,10 @@ Historical note:
 
 ### Added
 
+- Every GitHub release asset (installers, wheel and sdist, SBOMs,
+  `metrics.json`) carries a build-provenance attestation (#126). Check one
+  with `gh attestation verify <asset> -R anolishq/anolis-workbench`. The PyPI
+  publish now waits until every asset is built and attested.
 - After an observability install, the provision summary and Commission's
   deploy result say how to reach Grafana (#241): the ssh tunnel command for
   the target (with its port and key), or the network address when
