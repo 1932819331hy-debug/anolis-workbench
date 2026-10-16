@@ -108,6 +108,32 @@ describe("Onboarding.svelte — install progress and result (#228)", () => {
     expect(source.closed).toBe(true);
   });
 
+  it("opens the installed project in Operate after a local install (#238)", async () => {
+    const { onNavigate } = setup();
+    const source = await startLocal();
+
+    source.emit({
+      stage: "done",
+      summary: { runtime_version: "0.1.45", host_preflight: [], project: "sim-quickstart" },
+    });
+
+    await fireEvent.click(
+      await screen.findByRole("button", { name: "Open sim-quickstart in Operate" }),
+    );
+    expect(onNavigate).toHaveBeenCalledWith("/projects/sim-quickstart/operate");
+  });
+
+  it("offers no Operate shortcut when the done summary names no project", async () => {
+    setup();
+    const source = await startLocal();
+
+    source.emit({ stage: "done", summary: { runtime_version: "0.1.45" } });
+
+    expect(await screen.findByText("anolis-runtime v0.1.45 is installed.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /in Operate/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Go to projects" })).toBeInTheDocument();
+  });
+
   it("shows a successful install that let unmet requirements through, and a pending reboot", async () => {
     setup();
     const source = await startLocal();

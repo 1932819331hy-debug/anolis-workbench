@@ -41,6 +41,7 @@
     status?: string;
     error?: string | null;
     summary?: {
+      project?: string;
       runtime_version?: string;
       host_preflight?: string[];
       reboot_pending?: boolean;
@@ -53,6 +54,8 @@
 
   type ProvisionResult = {
     ok: boolean;
+    // Named by a local install's done summary only (#238).
+    project: string;
     runtimeVersion: string;
     error: string;
     hostPreflight: string[];
@@ -136,6 +139,7 @@
     if (data.stage === "done") {
       finishJob({
         ok: true,
+        project: data.summary?.project ?? "",
         runtimeVersion: data.summary?.runtime_version ?? "",
         error: "",
         hostPreflight: data.summary?.host_preflight ?? [],
@@ -146,6 +150,7 @@
     } else if (data.stage === "error") {
       finishJob({
         ok: false,
+        project: "",
         runtimeVersion: "",
         error: data.detail ?? "Install failed",
         hostPreflight: data.host_preflight ?? [],
@@ -158,6 +163,7 @@
       // ended without reporting either.
       finishJob({
         ok: data.status === "done",
+        project: "",
         runtimeVersion: "",
         error: data.error ?? `Install ${data.status ?? "ended"}`,
         hostPreflight: [],
@@ -184,6 +190,7 @@
       void forgetIfGone(job.jobId);
       finish({
         ok: false,
+        project: "",
         runtimeVersion: "",
         error:
           "Lost the connection to the workbench while installing. The install may still be running on the target.",
@@ -314,7 +321,21 @@
 
         <div class="onboarding-actions">
           {#if result.ok}
-            <button type="button" class="btn-primary" onclick={skip}>Go to projects</button>
+            {#if result.project}
+              {@const project = result.project}
+              <button
+                type="button"
+                class="btn-primary"
+                onclick={() => onNavigate(`/projects/${encodeURIComponent(project)}/operate`)}
+              >
+                Open {project} in Operate
+              </button>
+            {/if}
+            <button
+              type="button"
+              class={result.project ? "btn-secondary" : "btn-primary"}
+              onclick={skip}>Go to projects</button
+            >
           {:else}
             {#if canInstallAnyway(result)}
               {#if confirmingUnmet}

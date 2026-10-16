@@ -13,6 +13,14 @@ Historical note:
 
 ## [Unreleased]
 
+### Added
+
+- After a successful local install, Onboarding offers "Open `<project>` in
+  Operate" for the project the install seeded (closes #238), and the
+  project selector lists that project. A local provision job's `done`
+  summary carries `project`. A remote install still ends at "Go to
+  projects".
+
 ### Changed
 
 - The preflight hint for a missing runtime or provider binary no longer

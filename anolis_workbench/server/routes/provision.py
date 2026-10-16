@@ -120,6 +120,8 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             {
                 "stage": "done",
                 "summary": {
+                    # Onboarding opens it in Operate (#238); local installs only.
+                    "project": project,
                     "runtime_version": result.runtime_version,
                     "host_preflight": result.host_preflight,
                     "reboot_pending": result.reboot_pending,

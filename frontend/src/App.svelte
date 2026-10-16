@@ -347,6 +347,8 @@
     <Onboarding
       onNavigate={(path) => {
         showOnboarding = false;
+        // An install seeds its project after the list was fetched (#238).
+        void onProjectsRefreshed();
         void navigateTo(path, { bypassGuards: true });
       }}
     />
