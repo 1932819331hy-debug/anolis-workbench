@@ -13,6 +13,15 @@ Historical note:
 
 ## [Unreleased]
 
+### Changed
+
+- The preflight hint for a missing runtime or provider binary no longer
+  names a CMake preset or carries a Windows note for particular provider
+  kinds (closes #287). It names the repo and its build docs, the same for
+  every kind; how a provider is built is the provider's to document. A
+  kind with no vendored envelope gets a hint to set the binary's Executable
+  path in Compose.
+
 ### Fixed
 
 - Commission's preflight panel lists every system-level validation error

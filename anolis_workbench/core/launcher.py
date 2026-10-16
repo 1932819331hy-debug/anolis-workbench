@@ -12,7 +12,6 @@ import queue
 import signal
 import socket
 import subprocess
-import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -329,7 +328,7 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
         checks,
         "Runtime binary exists",
         runtime_exe,
-        hint=_build_binary_hint(runtime_exe, kind="runtime", repo="anolis", docs="docs/"),
+        hint=_build_binary_hint(runtime_exe, repo="anolis", docs="docs/"),
     )
 
     # Check 2: Provider binaries
@@ -347,7 +346,7 @@ def preflight(name: str, system: dict, project_dir: pathlib.Path) -> dict:
             checks,
             f"Provider {pid} binary exists",
             exe,
-            hint=_build_binary_hint(exe, kind=kind, repo=repo, docs=docs) if exe is not None else None,
+            hint=_build_binary_hint(exe, repo=repo, docs=docs) if exe is not None else None,
         )
 
     # Check 3: Output paths writable
@@ -411,33 +410,13 @@ def _preflight_result(checks: list[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Platform-aware build hints
+# Build hints
 # ---------------------------------------------------------------------------
 
-# Preset names per kind, keyed by platform ('win32' or 'other')
-_PRESETS: dict[str, dict[str, str]] = {
-    "win32": {
-        "runtime": "dev-windows-release",
-        "sim": "dev-windows-release",
-        "bread": "dev-windows-release",
-        "ezo": "dev-windows-release",
-        "custom": "dev-release",
-    },
-    "other": {
-        "runtime": "dev-release",
-        "sim": "dev-release",
-        "bread": "dev-linux-hardware-release",
-        "ezo": "dev-linux-hardware-release",
-        "custom": "dev-release",
-    },
-}
 
-
-def _build_binary_hint(exe: pathlib.Path | None, kind: str, repo: str | None, docs: str | None) -> str:
-    """Return an actionable build hint for a missing binary."""
-    platform_key = "win32" if sys.platform == "win32" else "other"
-    preset = _PRESETS.get(platform_key, {}).get(kind, "dev-release")
-
+def _build_binary_hint(exe: pathlib.Path | None, repo: str | None, docs: str | None) -> str:
+    """Return an actionable build hint for a missing binary. It carries no
+    per-kind facts: how a provider is built is the provider's to document (#287)."""
     # Detect whether the sibling repo directory exists
     if repo:
         sibling = pathlib.Path("..") / repo
@@ -451,14 +430,10 @@ def _build_binary_hint(exe: pathlib.Path | None, kind: str, repo: str | None, do
     parts = []
     if repo_note:
         parts.append(repo_note)
-    if sys.platform == "win32" and kind in ("bread", "ezo"):
-        parts.append(
-            "Windows note: use dev-windows-release for mock validation. "
-            "Live I2C hardware validation is expected on Linux with device access."
-        )
     if docs and repo:
         parts.append(f"Build docs: {repo}/{docs}")
-    parts.append(f"CMake preset: {preset}")
+    if not parts:
+        parts.append("Set the binary's Executable path in Compose (the project's host paths).")
     return "  ".join(parts)
 
 

@@ -16,7 +16,7 @@ import sys
 import pytest
 import yaml
 
-from anolis_workbench.core import canonical, launcher
+from anolis_workbench.core import canonical, launcher, provider_schemas
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="uses /bin/sh stub binaries")
 
@@ -227,3 +227,45 @@ def test_preflight_carries_a_summary_when_the_launch_projection_fails(project, m
     assert result["ok"] is False
     assert result["summary"] == {"passed": 0, "skipped": 0, "failed": 1}
     assert result["checks"][0]["error"] == "cannot project"
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_missing_provider_binary_hint_carries_no_per_kind_facts(
+    project, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    """The workbench holds no provider-specific knowledge (#287): the hint for
+    a missing provider binary reads the same for every packaged kind, on every
+    platform, once the kind's own name is factored out."""
+    pdir, document = project("exit 0")
+    monkeypatch.chdir(tmp_path)  # no sibling provider repos
+    document["host_paths"]["providers"]["sim0"]["executable"] = str(tmp_path / "missing-provider")
+
+    hints: dict[str, str] = {}
+    for kind in provider_schemas.available_kinds():
+        document["providers"]["sim0"]["kind"] = kind
+        with monkeypatch.context() as m:
+            m.setattr(sys, "platform", platform)
+            result = launcher.preflight("smoke", document, pdir)
+        check = _check(result, "Provider sim0 binary exists")
+        assert check["ok"] is False
+        hints[kind] = check["hint"].replace(kind, "<kind>")
+
+    assert len(set(hints.values())) == 1, hints
+
+
+def test_missing_binary_of_a_kind_without_an_envelope_gets_a_generic_hint(
+    project, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A kind the workbench vendors no envelope for still gets a hint, and it
+    names no kind: point the project's host path at the binary (#287)."""
+    pdir, document = project("exit 0")
+    monkeypatch.chdir(tmp_path)
+    document["host_paths"]["providers"]["sim0"]["executable"] = str(tmp_path / "missing-provider")
+    document["providers"]["sim0"]["kind"] = "thirdparty-xyz"
+
+    check = _check(launcher.preflight("smoke", document, pdir), "Provider sim0 binary exists")
+
+    assert check["ok"] is False
+    assert check["hint"]
+    assert "host path" in check["hint"].lower()
+    assert "thirdparty-xyz" not in check["hint"]
