@@ -291,6 +291,23 @@ export interface EstopStatus extends UnknownRecord {
   uncovered_actuating_functions: number;
 }
 
+/** One safe-state call, as in `EstopResponse.actions` (runtime-http `EstopAction`). */
+export interface EstopAction extends UnknownRecord {
+  device_handle: string;
+  function: string;
+  success: boolean;
+  error?: string;
+}
+
+/** The `startup_safe_state` block on `GET /v0/runtime/status` (anolis#392). */
+export interface StartupSafeStateStatus extends UnknownRecord {
+  on_startup: "safe_state" | "leave";
+  ran: boolean;
+  software_safe_state: SoftwareSafeState;
+  safe_state_achieved: boolean;
+  failed_actions: EstopAction[];
+}
+
 export interface TypedValue extends UnknownRecord {
   type: "double" | "int64" | "uint64" | "bool" | "string" | "bytes";
   double?: number;

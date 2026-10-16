@@ -13,6 +13,7 @@
     ProviderHealth,
     RuntimeApiStatus,
     RuntimeStatus,
+    StartupSafeStateStatus,
     TypedValue,
     UnknownRecord,
     WorkbenchConfig,
@@ -32,11 +33,13 @@
     extractParameters,
     extractProvidersHealth,
     extractRuntimeStatus,
+    extractStartupSafeState,
     normalizeParameterType,
     normalizeProviderHealthQuality,
     renderBtOutline,
     RUNTIME_MODES,
     summarizeEstopResponse,
+    summarizeStartupSafeState,
     versionAtLeast,
   } from "../lib/operate-contracts";
   import {
@@ -84,6 +87,7 @@
 
   // ── E-stop state (wb#236) ───────────────────────────────────────────────────
   let estop = $state<EstopStatus | null>(null);
+  let startupSafeState = $state<StartupSafeStateStatus | null>(null);
   let estopRunning = $state<boolean>(false);
   let clearRunning = $state<boolean>(false);
   let clearArmed = $state<boolean>(false);
@@ -195,6 +199,7 @@
     mode = "--";
     modeBadgeClass = "unknown";
     estop = null;
+    startupSafeState = null;
     estopFeedback = "";
     estopFeedbackClass = "field-note";
     clearArmed = false;
@@ -284,6 +289,8 @@
     // Keep the last-known estop state on a transient status-poll failure so the
     // safety control never disappears mid-session (wb#236).
     estop = rtRes.status === "fulfilled" ? extractEstopStatus(rtRes.value) : estop;
+    startupSafeState =
+      rtRes.status === "fulfilled" ? extractStartupSafeState(rtRes.value) : startupSafeState;
     parameters = parRes.status === "fulfilled" ? extractParameters(parRes.value) : [];
     automationStatus = asRes.status === "fulfilled" ? extractAutomationStatus(asRes.value) : null;
     behaviorTree = atRes.status === "fulfilled" ? extractAutomationTree(atRes.value) : "";
@@ -886,6 +893,14 @@
               </span>
             {/if}
           </div>
+        </div>
+      {/if}
+      {#if startupSafeState}
+        <!-- What safety.on_startup did when this runtime started (#483). The
+             verdict is the runtime's; a runtime older than 0.1.45 omits it. -->
+        {@const startup = summarizeStartupSafeState(startupSafeState)}
+        <div class={startup.ok ? "field-note" : "field-error"} data-testid="startup-safe-state">
+          {startup.text}
         </div>
       {/if}
       {#if estopFeedback}
