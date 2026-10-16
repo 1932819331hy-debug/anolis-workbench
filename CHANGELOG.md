@@ -39,6 +39,12 @@ Historical note:
   directory, and no longer reads as a deploy into `/opt/anolis`. The online
   path needs the target to reach the GitHub release downloads. The handoff
   package v1 format doc states the same purpose; the format is unchanged.
+- The README documents pip and a browser as the supported Raspberry Pi
+  setup (closes #231): `pipx install anolis-workbench && anolis-workbench`,
+  then `http://<pi>:3010` from another machine on a trusted network. It no
+  longer labels the desktop app "recommended", says the Linux desktop
+  bundles are x86_64 only, and gives the Python requirement as 3.10+, as
+  `pyproject.toml` does.
 
 ### Fixed
 

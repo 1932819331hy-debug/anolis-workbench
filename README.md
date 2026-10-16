@@ -17,11 +17,15 @@ Developer references:
 
 ### Download and run (recommended)
 
-**Desktop app (recommended for commissioning):**
+**Desktop app (Windows, macOS, x86_64 Linux):**
 
 Download the latest Tauri desktop installer from
 [Releases](https://github.com/anolishq/anolis-workbench/releases/latest).
 Run the installer — the desktop wrapper bundles the Python runtime and starts automatically.
+
+The Linux desktop bundles are x86_64 only; there is no desktop build for
+arm64 Linux. The desktop app is a window over the same local server and UI
+that browser mode serves, so nothing is lost without it.
 
 **CLI / server via PyPI:**
 
@@ -32,7 +36,28 @@ anolis-package <project>  # build a handoff package
 anolis-validate <pkg>     # validate a handoff package
 ```
 
-Requires Python 3.11+. Open `http://127.0.0.1:3010` in a browser after starting.
+Requires Python 3.10+. Open `http://127.0.0.1:3010` in a browser after starting.
+
+**On a Raspberry Pi (pip + browser, the supported Pi setup):**
+
+```sh
+pipx install anolis-workbench && anolis-workbench
+```
+
+On a Raspberry Pi the server binds to all interfaces and opens no browser,
+so browse to `http://<pi>:3010` from another machine on the network. It has
+no login: anyone who can reach that port can use the workbench. Keep it on a
+trusted network.
+`ANOLIS_WORKBENCH_HOST=127.0.0.1` keeps it on the Pi itself.
+
+To start the workbench at boot, add `--workbench-service` to the install,
+which also installs a systemd service for the workbench. It asks for your
+sudo password, and the service runs as you. The service always binds to all
+interfaces:
+
+```sh
+anolis-provision install --workbench-service
+```
 
 ### Build from source (contributors)
 
