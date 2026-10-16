@@ -1,0 +1,14 @@
+[0;32m✓ health: runtime responding (v0.1.45)[0m
+[0;33m⚠ health: run registry NOT available (GET /v0/runs did not answer 200) -- runs are not being recorded[0m
+    sudo journalctl -u anolis-runtime --no-pager | grep 'Run registry'
+[0;32m✓ health: providers: 2 of 2 running[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Anolis installation complete
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Prefix:   /opt/anolis
+  Profile:  manual
+  Port:     8080
+  Hostname: rig
+  Access:   http://rig.local:8080
+

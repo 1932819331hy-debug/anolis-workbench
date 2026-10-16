@@ -121,6 +121,39 @@ def test_done_event_carries_install_sh_observability_lines(
     assert summary["grafana_access"] == []
 
 
+@pytest.mark.parametrize("remote", [False, True])
+def test_done_event_carries_install_sh_health_lines(calls, monkeypatch: pytest.MonkeyPatch, remote: bool) -> None:
+    """install.sh warns and still exits 0 when a provider is not running, so
+    the summary must carry its health lines or the shortfall goes unseen."""
+    output = (pathlib.Path(__file__).parent.parent / "fixtures" / "install-sh" / "health-one-down.txt").read_text(
+        encoding="utf-8"
+    )
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        return deploy.DeployResult(project_name="rig", runtime_version="0.1.45", prefix="/opt/anolis", output=output)
+
+    class _Executor:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(deploy, "deploy_local", _deploy)
+    monkeypatch.setattr(deploy, "deploy_remote", _deploy)
+    monkeypatch.setattr(provision, "ParamikoSSHExecutor", _Executor)
+    monkeypatch.setattr("anolis_workbench.core.fleet.auto_register_host", lambda **kwargs: None)
+    job = provision.ProvisionJob(job_id="j7")
+    if remote:
+        provision._run_remote_job(job, {"project": "rig", "target": "pi@rig"})
+    else:
+        provision._run_install_job(job, {"project": "rig"})
+
+    health = job.events[-1]["summary"]["health"]
+    assert "⚠ health: providers: 1 of 2 running" in health
+    assert "⚠ health: provider io1: UNAVAILABLE" in health
+
+
 def test_allow_unmet_host_needs_a_literal_true(calls, monkeypatch: pytest.MonkeyPatch) -> None:
     def _deploy(**kwargs: Any) -> deploy.DeployResult:
         calls.append(kwargs)

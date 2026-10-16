@@ -553,6 +553,55 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     expect(screen.queryByText(/Observability needs attention/)).not.toBeInTheDocument();
   });
 
+  it('warns when install.sh reports a provider that is not running', async () => {
+    setup();
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), {
+      target: { value: 'pi@rig' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+
+    // tests/fixtures/install-sh/health-one-down.txt, through deploy.health_lines
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: {
+        runtime_version: '0.1.45',
+        health: [
+          '✓ health: runtime responding (v0.1.45)',
+          '✓ health: run registry available',
+          '⚠ health: providers: 1 of 2 running',
+          '⚠ health: provider io1: UNAVAILABLE',
+          '    sudo journalctl -u anolis-runtime --no-pager -n 50',
+        ],
+      },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(screen.getByText(/Health needs attention/)).toBeInTheDocument();
+    expect(screen.getByText('⚠ health: provider io1: UNAVAILABLE')).toHaveClass('deploy-warning');
+    expect(screen.getByText('⚠ health: providers: 1 of 2 running')).toHaveClass('deploy-warning');
+    expect(screen.getByText('✓ health: run registry available')).not.toHaveClass('deploy-warning');
+  });
+
+  it('shows install.sh health lines without a warning when every provider runs', async () => {
+    setup();
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), {
+      target: { value: 'pi@rig' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: {
+        runtime_version: '0.1.45',
+        health: ['✓ health: runtime responding (v0.1.45)', '✓ health: providers: 2 of 2 running'],
+      },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(screen.getByText("install.sh's health check:")).toBeInTheDocument();
+    expect(screen.getByText('✓ health: providers: 2 of 2 running')).toBeInTheDocument();
+    expect(screen.queryByText(/Health needs attention/)).not.toBeInTheDocument();
+  });
+
   it('says where Grafana listens without promising a tunnel on every runtime', () => {
     setup();
     const note = screen.getByText(/Installed on the target beside the runtime/);

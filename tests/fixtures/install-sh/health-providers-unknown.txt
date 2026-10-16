@@ -1,0 +1,13 @@
+[0;32m✓ health: runtime responding (v0.1.45)[0m
+[0;32m✓ health: run registry available[0m
+[0;33m⚠ health: providers unknown (GET /v0/providers/health did not answer)[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Anolis installation complete
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Prefix:   /opt/anolis
+  Profile:  manual
+  Port:     8080
+  Hostname: rig
+  Access:   http://rig.local:8080
+

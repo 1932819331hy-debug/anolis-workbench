@@ -215,6 +215,46 @@ class TestObservabilityFlag:
         out, _ = capsys.readouterr()
         assert f"\n      ssh -i {key} -L 3000:127.0.0.1:3000 pi@host\n" in out
 
+    def test_install_shows_a_provider_that_is_not_running(self, tmp_path, monkeypatch, capsys) -> None:
+        output = (self._FIXTURES / "health-one-down.txt").read_text(encoding="utf-8")
+        assert self._run_install_with_output(tmp_path, monkeypatch, output) == 0
+        out, err = capsys.readouterr()
+        assert "  Health (install.sh):" in out
+        assert "    ⚠ health: providers: 1 of 2 running\n" in out
+        assert "    ⚠ health: provider io1: UNAVAILABLE\n" in out
+        assert "Hostname:" not in out
+        assert "WARNING" in err and "health" in err
+
+    def test_install_shows_health_without_a_warning_when_all_providers_run(self, tmp_path, monkeypatch, capsys) -> None:
+        output = (self._FIXTURES / "health-all-running.txt").read_text(encoding="utf-8")
+        assert self._run_install_with_output(tmp_path, monkeypatch, output) == 0
+        out, err = capsys.readouterr()
+        assert "    ✓ health: providers: 2 of 2 running\n" in out
+        assert err == ""
+
+    def test_remote_shows_a_provider_that_is_not_running(self, tmp_path, monkeypatch, capsys) -> None:
+        from anolis_workbench.cli import provision_cli
+        from anolis_workbench.core import deploy
+        from anolis_workbench.core import executor as executor_module
+
+        class _FakeSSH:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def run(self, cmd: list[str], **kwargs: object) -> executor_module.RunResult:
+                return executor_module.RunResult(returncode=0, stdout="x86_64\n", stderr="")
+
+        output = (self._FIXTURES / "health-one-down.txt").read_text(encoding="utf-8")
+        result = deploy.DeployResult(project_name="p", runtime_version="0.1.45", prefix="/opt/anolis", output=output)
+        monkeypatch.setattr(executor_module, "SubprocessSSHExecutor", _FakeSSH)
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "deploy_remote", lambda **kwargs: result)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "remote", "--target", "pi@host"])
+        assert provision_cli._run_remote(provision_cli._parse_args()) == 0
+        out, err = capsys.readouterr()
+        assert "    ⚠ health: provider io1: UNAVAILABLE\n" in out
+        assert "WARNING" in err and "health" in err
+
     def test_install_shows_a_tail_when_install_sh_printed_no_observability_lines(
         self, tmp_path, monkeypatch, capsys
     ) -> None:

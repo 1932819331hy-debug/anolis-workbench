@@ -415,11 +415,27 @@ def observability_lines(stdout: str) -> list[str]:
     stripped, each with the indented detail that follows it. install.sh
     reports every observability failure as a warning and still exits 0, so
     these lines are the only place a failure shows."""
+    return _marked_lines(stdout, lambda line: any(mark in line for mark in _OBSERVABILITY_MARKS))
+
+
+# install.sh's phase_health lines: a status glyph, then "health:".
+_HEALTH_RE = re.compile(r"^\S+ health:")
+
+
+def health_lines(stdout: str) -> list[str]:
+    """install.sh's health lines (runtime, run registry, provider liveness),
+    ANSI stripped, each with the indented detail that follows it. A provider
+    that is not running is a warning and install.sh still exits 0, so these
+    lines are the only place it shows."""
+    return _marked_lines(stdout, lambda line: _HEALTH_RE.match(line) is not None)
+
+
+def _marked_lines(stdout: str, is_mark: Callable[[str], bool]) -> list[str]:
     lines = _ANSI_RE.sub("", stdout).splitlines()
     out: list[str] = []
     in_block = False
     for line in lines:
-        if any(mark in line for mark in _OBSERVABILITY_MARKS):
+        if is_mark(line):
             out.append(line)
             in_block = True
         elif in_block and line.startswith(_DETAIL_INDENT) and line.strip():

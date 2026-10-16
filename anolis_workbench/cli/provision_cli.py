@@ -386,6 +386,21 @@ def _print_host_followups(result: deploy.DeployResult) -> None:
         )
 
 
+def _print_health(result: deploy.DeployResult) -> None:
+    """install.sh's health lines. A provider that is not running is a
+    warning and install.sh still exits 0, so without this the summary hides
+    it."""
+    lines = deploy.health_lines(result.output)
+    if not lines:
+        return
+    print()
+    print("  Health (install.sh):")
+    for line in lines:
+        print(f"    {line}")
+    if any(line.startswith("⚠") for line in lines):
+        print("\nWARNING: health: install.sh reported a problem — see the lines above", file=sys.stderr)
+
+
 def _print_observability(
     result: deploy.DeployResult, *, ssh_target: str | None = None, ssh_port: int = 22, ssh_key: str | None = None
 ) -> None:
@@ -479,6 +494,7 @@ def _run_install(args: argparse.Namespace) -> int:
         print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
         print(f"  ✓ Project: {project_dir}")
         _print_host_followups(result)
+        _print_health(result)
         if _wants_observability(args):
             _print_observability(result)
         print()
@@ -640,6 +656,7 @@ def _run_remote(args: argparse.Namespace) -> int:
     print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
     print(f"  ✓ Project: {project_dir}")
     _print_host_followups(result)
+    _print_health(result)
     if _wants_observability(args):
         _print_observability(
             result,

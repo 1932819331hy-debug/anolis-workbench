@@ -871,6 +871,60 @@ def test_observability_lines_show_the_bind_unchanged_line() -> None:
     ]
 
 
+# health-*.txt are anolis v0.1.45 tools/install.sh's phase_health followed by
+# phase_summary, captured the same way with curl, sleep and hostname stubbed
+# as shell functions. Each names the runtime's answers it was given.
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        (
+            "health-all-running",
+            [
+                "✓ health: runtime responding (v0.1.45)",
+                "✓ health: run registry available",
+                "✓ health: providers: 2 of 2 running",
+            ],
+        ),
+        (
+            "health-one-down",
+            [
+                "✓ health: runtime responding (v0.1.45)",
+                "✓ health: run registry available",
+                "⚠ health: providers: 1 of 2 running",
+                "⚠ health: provider io1: UNAVAILABLE",
+                "    sudo journalctl -u anolis-runtime --no-pager -n 50",
+            ],
+        ),
+        (
+            "health-providers-unknown",
+            [
+                "✓ health: runtime responding (v0.1.45)",
+                "✓ health: run registry available",
+                "⚠ health: providers unknown (GET /v0/providers/health did not answer)",
+            ],
+        ),
+        (
+            "health-registry-down",
+            [
+                "✓ health: runtime responding (v0.1.45)",
+                "⚠ health: run registry NOT available (GET /v0/runs did not answer 200) -- runs are not being recorded",
+                "    sudo journalctl -u anolis-runtime --no-pager | grep 'Run registry'",
+                "✓ health: providers: 2 of 2 running",
+            ],
+        ),
+        ("health-no-start", ["→ health: skipped (services not started)"]),
+    ],
+)
+def test_health_lines_are_install_sh_health_report(name: str, expected: list[str]) -> None:
+    assert deploy.health_lines(_install_sh_output(name)) == expected
+
+
+def test_health_and_observability_lines_do_not_overlap() -> None:
+    output = _install_sh_output("pi-loopback")
+    assert deploy.health_lines(output) == ["✓ health: runtime responding (v0.1.45)"]
+    assert not any("health:" in line for line in deploy.observability_lines(output))
+
+
 _ADMIN_LOGIN_NOTE = "admin password: GRAFANA_ADMIN_PASSWORD in /etc/anolis/observability.env on the target (root only)"
 
 

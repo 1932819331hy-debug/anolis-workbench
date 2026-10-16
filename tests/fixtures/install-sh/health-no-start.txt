@@ -1,0 +1,11 @@
+[0;33m→ health: skipped (services not started)[0m
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ Anolis installation complete
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Prefix:   /opt/anolis
+  Profile:  manual
+  Port:     8080
+  Hostname: rig
+  Access:   http://rig.local:8080
+
