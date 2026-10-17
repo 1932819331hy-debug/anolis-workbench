@@ -151,3 +151,81 @@ class TestProvisionInstallFlag:
         assert not (unit_dir / workbench_service.SERVICE_NAME).exists()
         assert rec.copied is not None
         assert _lines(rec.copied, "User=") == ["User=bob"]
+
+
+class _UninstallRecorder:
+    """Stands in for subprocess.run: fails the named steps, reports LoadState."""
+
+    def __init__(self, fail_on: tuple[str, ...] = (), load_state: str | None = "loaded") -> None:
+        self.calls: list[list[str]] = []
+        self.fail_on = fail_on
+        self.load_state = load_state
+
+    def __call__(self, cmd: list[str], *args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        cmd = list(cmd)
+        self.calls.append(cmd)
+        if "show" in cmd:
+            if self.load_state is None:
+                return subprocess.CompletedProcess(cmd, 1, b"", b"show: failed")
+            return subprocess.CompletedProcess(cmd, 0, f"{self.load_state}\n".encode(), b"")
+        failing = [step for step in self.fail_on if step in cmd]
+        if failing:
+            return subprocess.CompletedProcess(cmd, 1, b"", f"{failing[0]}: refused".encode())
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    def sudo_steps(self) -> list[list[str]]:
+        return [c[1:] for c in self.calls if c[0] == "sudo"]
+
+
+class TestUninstallService:
+    def test_removes_the_unit_under_sudo(self, unit_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        rec = _UninstallRecorder()
+        monkeypatch.setattr(subprocess, "run", rec)
+        result = workbench_service.uninstall_service()
+
+        assert result.error is None
+        assert rec.sudo_steps() == [
+            ["systemctl", "stop", workbench_service.SERVICE_NAME],
+            ["systemctl", "disable", workbench_service.SERVICE_NAME],
+            ["rm", "-f", str(unit_dir / workbench_service.SERVICE_NAME)],
+            ["systemctl", "daemon-reload"],
+        ]
+
+    @pytest.mark.parametrize("step", ["rm", "daemon-reload"])
+    def test_a_failed_step_is_an_error(self, step: str, unit_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(subprocess, "run", _UninstallRecorder(fail_on=(step,), load_state="not-found"))
+        result = workbench_service.uninstall_service()
+        assert result.error is not None
+        assert f"{step}: refused" in result.error
+
+    @pytest.mark.parametrize("step", ["stop", "disable"])
+    @pytest.mark.parametrize("load_state", ["loaded", "masked", None])
+    def test_stop_or_disable_failing_on_a_loaded_unit_is_an_error(
+        self, step: str, load_state: str | None, unit_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _UninstallRecorder(fail_on=(step,), load_state=load_state)
+        monkeypatch.setattr(subprocess, "run", rec)
+        result = workbench_service.uninstall_service()
+        assert result.error is not None
+        assert f"{step}: refused" in result.error
+        assert not any("rm" in c for c in rec.sudo_steps())
+
+    def test_stop_and_disable_on_a_not_loaded_unit_are_tolerated(
+        self, unit_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = _UninstallRecorder(fail_on=("stop", "disable"), load_state="not-found")
+        monkeypatch.setattr(subprocess, "run", rec)
+        result = workbench_service.uninstall_service()
+
+        assert result.error is None
+        assert rec.sudo_steps()[2:] == [
+            ["rm", "-f", str(unit_dir / workbench_service.SERVICE_NAME)],
+            ["systemctl", "daemon-reload"],
+        ]
+
+    @pytest.mark.parametrize("load_state", ["loaded", "not-found"])
+    def test_a_refused_sudo_is_an_error(self, load_state: str, unit_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(subprocess, "run", _UninstallRecorder(fail_on=("sudo",), load_state=load_state))
+        result = workbench_service.uninstall_service()
+        assert result.error is not None
+        assert "sudo: refused" in result.error

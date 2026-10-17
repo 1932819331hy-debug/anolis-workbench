@@ -125,16 +125,31 @@ def install_service(
     return WorkbenchServiceResult(installed=True, enabled=True, started=True)
 
 
+def _sudo_unless_not_loaded(exe: Executor, cmd: list[str]) -> None:
+    """Run a systemctl step, tolerating failure only when the unit is not loaded.
+
+    systemctl(1) advises against reading its exit codes and to check the
+    unit state instead; LoadState is "not-found" when no unit file exists.
+    """
+    try:
+        _sudo(exe, cmd)
+    except OSError:
+        state = exe.run(["systemctl", "show", "--property=LoadState", "--value", SERVICE_NAME])
+        if state.stdout.strip() == "not-found":
+            return
+        raise
+
+
 def uninstall_service(executor: Executor | None = None) -> WorkbenchServiceResult:
     """Stop, disable, and remove the workbench systemd service."""
     exe = executor or LocalExecutor()
     unit_path = _SYSTEMD_UNIT_DIR / SERVICE_NAME
 
     try:
-        exe.run(["systemctl", "stop", SERVICE_NAME], sudo=True)
-        exe.run(["systemctl", "disable", SERVICE_NAME], sudo=True)
-        exe.run(["rm", "-f", str(unit_path)], sudo=True)
-        exe.run(["systemctl", "daemon-reload"], sudo=True)
+        _sudo_unless_not_loaded(exe, ["systemctl", "stop", SERVICE_NAME])
+        _sudo_unless_not_loaded(exe, ["systemctl", "disable", SERVICE_NAME])
+        _sudo(exe, ["rm", "-f", str(unit_path)])
+        _sudo(exe, ["systemctl", "daemon-reload"])
     except Exception as exc:
         return WorkbenchServiceResult(installed=False, enabled=False, started=False, error=str(exc))
 
