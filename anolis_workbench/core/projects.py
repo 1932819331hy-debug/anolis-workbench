@@ -410,14 +410,23 @@ def safe_state_warnings(document: dict) -> list[str]:
 def _with_derived_warnings(document: dict) -> list[str]:
     """Sidecar warnings plus the ones derived from the document itself.
 
-    Version skew (#283) is a pure function of the document and the packaged
-    envelopes, so it is computed here rather than recorded at import or save
-    time — correcting a pin, or syncing the envelope that resolves the skew,
-    clears it on the next read with no stale copy left behind (#290).
+    Each derived warning is a pure function of the document (and, for
+    version skew, #283, the packaged envelopes), so it is computed here rather
+    than recorded at import or save time — fixing the condition clears it on
+    the next read with no stale copy left behind (#290). A copy an older save
+    wrote to the sidecar is dropped for the same reason.
     """
     carried = document.get("warnings")
-    warnings = [w for w in carried if isinstance(w, str)] if isinstance(carried, list) else []
-    derived = provider_schemas.version_skew_warnings(document) + safe_state_warnings(document)
+    warnings = (
+        [w for w in carried if isinstance(w, str) and not canonical_validator.is_project_warning(w)]
+        if isinstance(carried, list)
+        else []
+    )
+    derived = (
+        canonical_validator.project_warnings(document)
+        + provider_schemas.version_skew_warnings(document)
+        + safe_state_warnings(document)
+    )
     return warnings + [w for w in derived if w not in warnings]
 
 
@@ -572,13 +581,11 @@ def save_project(name: str, document: dict) -> None:
     sidecar["meta"] = meta
     # Keep warnings the migrator recorded (a dropped provider, an automation
     # variant that could not be carried) — they describe data the user LOST and
-    # must not be erased by the first save. Only the advisory set this function
-    # owns is recomputed.
-    advisory = set(canonical_validator.project_warnings({**document, "profile": {}, "variants": {}}))
+    # must not be erased by the first save. Warnings derived from the document
+    # are computed on read and never stored (#290); drop any an older save left.
     previous = sidecar.get("warnings")
     carried = [w for w in previous if isinstance(w, str)] if isinstance(previous, list) else []
-    recomputed = canonical_validator.project_warnings(document)
-    sidecar["warnings"] = [w for w in carried if w not in advisory and w not in recomputed] + recomputed
+    sidecar["warnings"] = [w for w in carried if not canonical_validator.is_project_warning(w)]
     canonical.write_sidecar(pdir, sidecar)
 
 

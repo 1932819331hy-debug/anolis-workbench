@@ -100,10 +100,16 @@ def project_warnings(document: dict[str, Any]) -> list[str]:
         entries = doc.get("providers")
         if isinstance(entries, list):
             run_somewhere.update(str(e.get("id")) for e in entries if isinstance(e, dict) and e.get("id") is not None)
-    return [
-        f"Provider '{pid}' is declared in the machine-profile but run by no runtime variant."
-        for pid in sorted(set(profile_providers) - run_somewhere)
-    ]
+    return [f"Provider '{pid}{_UNRUN_PROVIDER_SUFFIX}" for pid in sorted(set(profile_providers) - run_somewhere)]
+
+
+_UNRUN_PROVIDER_SUFFIX = "' is declared in the machine-profile but run by no runtime variant."
+
+
+def is_project_warning(message: str) -> bool:
+    """Whether `message` is one `project_warnings` emits. Saves before #290
+    persisted these to the sidecar, where they outlived the condition."""
+    return message.startswith("Provider '") and message.endswith(_UNRUN_PROVIDER_SUFFIX)
 
 
 def _reference_containment_errors(profile: dict[str, Any]) -> list[str]:

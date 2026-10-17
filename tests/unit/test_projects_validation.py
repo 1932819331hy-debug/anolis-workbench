@@ -342,6 +342,55 @@ def test_migration_warnings_survive_the_first_save(_systems_root: pathlib.Path) 
     assert any("has no kind" in w for w in projects.get_project("legacy")["warnings"])
 
 
+UNRUN_SIM1 = "Provider 'sim1' is declared in the machine-profile but run by no runtime variant."
+MIGRATION_NOTE = "Provider 'legacy0' has no kind; it was dropped from the migrated project."
+
+
+def _sidecar_warnings(pdir: pathlib.Path) -> list[str]:
+    import json
+
+    sidecar = json.loads((pdir / machine_profile.SIDECAR_NAME).read_text(encoding="utf-8"))
+    return list(sidecar.get("warnings") or [])
+
+
+def test_a_project_warning_clears_once_its_condition_is_fixed(_systems_root: pathlib.Path) -> None:
+    """Derived warnings are computed on read, never carried in the sidecar (#290)."""
+    document = _load_template("sim-quickstart")
+    unrun = copy.deepcopy(document)
+    unrun["profile"]["providers"]["sim1"] = {"config": canonical.provider_config_relpath("sim", "sim1")}
+    unrun["providers"]["sim1"] = copy.deepcopy(unrun["providers"]["sim0"])
+    unrun["providers"]["sim1"]["config"]["provider"]["name"] = "sim1"
+    projects.save_project("unrun", unrun)
+    assert UNRUN_SIM1 in projects.get_project("unrun")["warnings"]
+
+    projects.save_project("unrun", document)
+
+    assert UNRUN_SIM1 not in projects.get_project("unrun")["warnings"]
+    assert UNRUN_SIM1 not in _sidecar_warnings(_systems_root / "unrun")
+
+
+def test_a_stale_project_warning_in_an_existing_sidecar_is_not_served(_systems_root: pathlib.Path) -> None:
+    """A sidecar written before #290 can hold a derived warning that is no
+    longer true. Reading hides it and the next save drops it; the migration
+    note beside it stays."""
+    import json
+
+    projects.save_project("stale", _load_template("sim-quickstart"))
+    path = _systems_root / "stale" / machine_profile.SIDECAR_NAME
+    sidecar = json.loads(path.read_text(encoding="utf-8"))
+    sidecar["warnings"] = [MIGRATION_NOTE, UNRUN_SIM1]
+    path.write_text(json.dumps(sidecar), encoding="utf-8")
+
+    served = projects.get_project("stale")["warnings"]
+    assert UNRUN_SIM1 not in served
+    assert MIGRATION_NOTE in served
+
+    projects.save_project("stale", projects.get_project("stale"))
+
+    assert _sidecar_warnings(_systems_root / "stale") == [MIGRATION_NOTE]
+    assert MIGRATION_NOTE in projects.get_project("stale")["warnings"]
+
+
 def _legacy_with_telemetry(systems_root: pathlib.Path, name: str) -> None:
     """The shipped v2 template with telemetry on: its influxdb block carries
     `token: dev-token`, which the migration used to copy."""
