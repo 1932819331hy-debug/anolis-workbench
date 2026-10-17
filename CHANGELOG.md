@@ -13,8 +13,34 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-17
+
+### Security
+
+- Project and template names are checked at every entry that uses them
+  to name a directory. `POST /api/provision/install`, `/remote` and
+  `/bundle` answer 400 for an invalid project or template without
+  starting a job, and `POST /api/projects` checks the template.
+  `anolis-provision install`, `bundle` and `remote` reject an invalid
+  `--project` or `--template` as a usage error (exit 2), and a fleet
+  file's names are checked when it loads. An absent or empty template
+  still falls back to the default.
+- Removing a project directory refuses any path that is not a real
+  directory strictly inside the workspace root: the root itself, a
+  symlink, and a path that resolves outside it.
+
 ### Added
 
+- Operate shows what the runtime's startup safe state did (closes #483):
+  every call accepted by its provider, which calls failed, no call
+  issued, outputs left as they were (`on_startup: leave`), or nothing
+  declared. Runtimes older than 0.1.45 do not report it, and Operate
+  shows nothing for them.
+- The provision summary and Commission's deploy result show
+  `install.sh`'s health lines (closes #239), including how many
+  providers are running and which are not. `install.sh` reports a
+  provider that is not running as a warning and still exits 0, so this
+  is where it shows. Needs a project pinned to anolis 0.1.45 or later.
 - After a successful local install, Onboarding offers "Open `<project>` in
   Operate" for the project the install seeded (closes #238), and the
   project selector lists that project. A local provision job's `done`
