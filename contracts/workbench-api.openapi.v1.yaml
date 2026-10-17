@@ -53,6 +53,7 @@ paths:
                   description: New project name
                 template:
                   type: string
+                  pattern: '^[a-zA-Z0-9_-]{1,64}$'
                   description: Template ID to create from
               additionalProperties: true
       responses:

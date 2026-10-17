@@ -13,6 +13,7 @@ from typing import Any
 
 import yaml
 
+from anolis_workbench.core import projects
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 # The template a fleet entry seeds a MISSING project from. Only used when the
@@ -114,13 +115,20 @@ def load_fleet_file(fleet_path: Path) -> FleetConfig:
             raise ValueError(f"Target {i} must be a mapping")
         if "name" not in entry or "host" not in entry:
             raise ValueError(f"Target {i} missing required 'name' or 'host' field")
+        project = entry.get("project", defaults.get("project", DEFAULT_TEMPLATE))
+        template = entry.get("template", defaults.get("template", DEFAULT_TEMPLATE))
+        for key, value in (("project", project), ("template", template)):
+            if not isinstance(value, str) or projects.validate_name(value):
+                raise ValueError(
+                    f"Target {i} '{key}' must be 1-64 characters: letters, digits, hyphens, underscores only"
+                )
 
         targets.append(
             FleetTarget(
                 name=entry["name"],
                 host=entry["host"],
-                project=entry.get("project", defaults.get("project", DEFAULT_TEMPLATE)),
-                template=entry.get("template", defaults.get("template", DEFAULT_TEMPLATE)),
+                project=project,
+                template=template,
                 install_prefix=Path(
                     entry.get("install_prefix", defaults.get("install_prefix", str(DEFAULT_INSTALL_PREFIX)))
                 ),

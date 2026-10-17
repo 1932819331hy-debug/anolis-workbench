@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from anolis_workbench.core import canonical, deploy, installer, machine_profile, releases
+from anolis_workbench.core import canonical, deploy, installer, machine_profile, projects, releases
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core.executor import ParamikoSSHExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
@@ -215,11 +215,28 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _reject_invalid_names(handler: Any, params: dict[str, Any]) -> bool:
+    """`project` and `template` name directories under the workspace and
+    template roots, so both are held to the project-name rule."""
+    for key in ("project", "template"):
+        value = params.get(key)
+        if value in (None, ""):
+            continue
+        if not isinstance(value, str) or projects.validate_name(value):
+            handler._json(
+                400, {"error": f"'{key}' must be 1-64 characters: letters, digits, hyphens, underscores only."}
+            )
+            return True
+    return False
+
+
 def start_install(handler: Any) -> None:
     """POST /api/provision/install — start a local install job."""
     content_length = int(handler.headers.get("Content-Length", 0))
     body = handler.rfile.read(content_length) if content_length else b"{}"
     params = json.loads(body)
+    if _reject_invalid_names(handler, params):
+        return
 
     job = _create_job()
     thread = threading.Thread(target=_run_install_job, args=(job, params), daemon=True)
@@ -236,6 +253,8 @@ def start_remote(handler: Any) -> None:
 
     if "target" not in params:
         handler._json(400, {"error": "Missing 'target' field (user@host)"})
+        return
+    if _reject_invalid_names(handler, params):
         return
 
     job = _create_job()
@@ -350,6 +369,8 @@ def start_bundle(handler: Any) -> None:
     if arch is not None and arch not in releases.SUPPORTED_ARCHS:
         expected = ", ".join(releases.SUPPORTED_ARCHS)
         handler._json(400, {"error": f"Unsupported arch {arch!r}; expected one of {expected}"})
+        return
+    if _reject_invalid_names(handler, params):
         return
 
     job = _create_job()

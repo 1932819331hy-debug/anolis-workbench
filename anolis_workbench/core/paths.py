@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 
 CORE_DIR = pathlib.Path(__file__).resolve().parent
 PACKAGE_DIR = CORE_DIR.parent
@@ -69,6 +70,24 @@ PROVIDER_SCHEMAS_DIR = _select_asset_path(
     _SOURCE_ASSET_ROOT / "schemas" / "providers",
     _PACKAGED_ASSET_ROOT / "schemas" / "providers",
 )
+
+
+class UnsafeDeleteError(ValueError):
+    """Raised when a directory removal would reach outside its root."""
+
+
+def rmtree_within(target: pathlib.Path, root: pathlib.Path, *, ignore_errors: bool = False) -> None:
+    """Remove `target` only if it is a real directory strictly inside `root`.
+
+    Refuses a symlink, the root itself, and anything that resolves outside it.
+    """
+    if target.is_symlink():
+        raise UnsafeDeleteError("Refusing to delete a symlink")
+    resolved = target.resolve()
+    base = root.resolve()
+    if base not in resolved.parents:
+        raise UnsafeDeleteError("Refusing to delete outside the project root")
+    shutil.rmtree(resolved, ignore_errors=ignore_errors)
 
 
 def resolve_data_path(path_value: str) -> pathlib.Path:

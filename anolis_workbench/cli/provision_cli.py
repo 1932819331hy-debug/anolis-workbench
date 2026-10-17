@@ -7,11 +7,19 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from anolis_workbench.core import deploy, installer, releases
+from anolis_workbench.core import deploy, installer, projects, releases
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 if TYPE_CHECKING:
     from anolis_workbench.core import fleet as fleet_module
+
+
+def _name_arg(value: str) -> str:
+    """--project and --template name directories under the workspace and
+    template roots, so both are held to the project-name rule."""
+    if projects.validate_name(value):
+        raise argparse.ArgumentTypeError("must be 1-64 characters: letters, digits, hyphens, underscores only")
+    return value
 
 
 def _parse_args() -> argparse.Namespace:
@@ -28,11 +36,13 @@ def _parse_args() -> argparse.Namespace:
     )
     install_parser.add_argument(
         "--project",
+        type=_name_arg,
         default=None,
         help="Project name to create (defaults to the template name).",
     )
     install_parser.add_argument(
         "--template",
+        type=_name_arg,
         default=None,
         help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )
@@ -94,11 +104,13 @@ def _parse_args() -> argparse.Namespace:
     )
     bundle_parser.add_argument(
         "--project",
+        type=_name_arg,
         default=None,
         help="Project name for the bundle (defaults to the template name).",
     )
     bundle_parser.add_argument(
         "--template",
+        type=_name_arg,
         default=None,
         help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )
@@ -139,11 +151,13 @@ def _parse_args() -> argparse.Namespace:
     )
     remote_parser.add_argument(
         "--project",
+        type=_name_arg,
         default=None,
         help="Project name to create on the target (defaults to the template name).",
     )
     remote_parser.add_argument(
         "--template",
+        type=_name_arg,
         default=None,
         help="Template to seed a NEW project from (default: sim-quickstart). Real machines are imported, not seeded.",
     )

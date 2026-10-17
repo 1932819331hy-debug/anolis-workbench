@@ -73,7 +73,7 @@ def provision_project(
     if project_dir.exists():
         if not force:
             raise ValueError(f"Project '{project_name}' already exists at {project_dir}. Use --force to overwrite.")
-        shutil.rmtree(project_dir)
+        paths_module.rmtree_within(project_dir, systems_root)
 
     source = system_path if system_path is not None else paths_module.TEMPLATES_ROOT / template_name
     if source.is_file():  # a legacy system.json handed to the CLI

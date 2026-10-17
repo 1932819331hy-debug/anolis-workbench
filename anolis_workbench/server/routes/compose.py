@@ -24,6 +24,9 @@ def create_project(handler) -> None:
     if not template:
         handler._json(400, {"error": "template required"})
         return
+    if not isinstance(template, str) or projects_module.validate_name(template):
+        handler._json(400, {"error": "template must be 1-64 characters: letters, digits, hyphens, underscores only."})
+        return
     try:
         system = projects_module.create_project_from_template(name, template)
         handler._json(201, system)

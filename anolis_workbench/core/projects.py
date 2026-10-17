@@ -529,7 +529,7 @@ def import_project(source_path: str, name: str | None = None) -> tuple[dict, lis
         }
         sidecar_path(name).write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
     except Exception:
-        shutil.rmtree(pdir, ignore_errors=True)
+        paths_module.rmtree_within(pdir, SYSTEMS_ROOT, ignore_errors=True)
         raise
     return meta, report.warnings
 
@@ -694,7 +694,7 @@ def create_project_from_template(name: str, template: str) -> dict:
         }
         canonical.write_sidecar(pdir, sidecar)
     except Exception:
-        shutil.rmtree(pdir, ignore_errors=True)
+        paths_module.rmtree_within(pdir, SYSTEMS_ROOT, ignore_errors=True)
         raise
     return get_project(name)
 
@@ -765,7 +765,7 @@ def duplicate_project(source_name: str, new_name: str) -> dict:
                 sidecar["warnings"] = ([*warnings] if isinstance(warnings, list) else []) + [conflict]
         canonical.write_sidecar(pdir, sidecar)
     except Exception:
-        shutil.rmtree(project_dir(new_name), ignore_errors=True)
+        paths_module.rmtree_within(project_dir(new_name), SYSTEMS_ROOT, ignore_errors=True)
         raise
     return get_project(new_name)
 
@@ -776,4 +776,4 @@ def delete_project(name: str) -> None:
         raise FileNotFoundError(f"Project '{name}' not found")
     if is_running(name):
         raise ValueError(f"Project '{name}' is running")
-    shutil.rmtree(project_dir(name))
+    paths_module.rmtree_within(project_dir(name), SYSTEMS_ROOT)
