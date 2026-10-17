@@ -13,6 +13,14 @@ Historical note:
 
 ## [Unreleased]
 
+### Security
+
+- The server refuses, with 403, a request whose `Host` does not name this
+  machine (an IP address, `localhost`, or the hostname, plain or `.local`)
+  and a browser request whose `Origin` does not match `Host`. Names listed
+  in `ANOLIS_WORKBENCH_ALLOWED_HOSTS` (comma-separated) are also accepted.
+  Requests without `Origin`, such as from curl or a script, are unaffected.
+
 ## [0.17.0] - 2026-10-17
 
 ### Security

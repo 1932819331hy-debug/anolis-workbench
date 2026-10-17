@@ -49,6 +49,7 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
    - `ANOLIS_WORKBENCH_PORT`
    - `ANOLIS_TELEMETRY_URL`
    - `ANOLIS_WORKBENCH_OPEN_BROWSER`
+   - `ANOLIS_WORKBENCH_ALLOWED_HOSTS`
 
 ## Validation Gates
 

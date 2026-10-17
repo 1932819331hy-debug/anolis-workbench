@@ -50,6 +50,12 @@ no login: anyone who can reach that port can use the workbench. Keep it on a
 trusted network.
 `ANOLIS_WORKBENCH_HOST=127.0.0.1` keeps it on the Pi itself.
 
+The server answers only requests addressed to this machine: an IP address,
+`localhost`, or the machine's hostname (plain or `.local`). To reach it
+under another name, such as a DNS name or a reverse proxy's, list that name
+in `ANOLIS_WORKBENCH_ALLOWED_HOSTS` (comma-separated). A request from a
+browser page must also come from the workbench's own address.
+
 To start the workbench at boot, add `--workbench-service` to the install,
 which also installs a systemd service for the workbench. It asks for your
 sudo password, and the service runs as you. The service always binds to all

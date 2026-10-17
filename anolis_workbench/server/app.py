@@ -17,6 +17,7 @@ from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
 from anolis_workbench.core import provider_schemas
 from anolis_workbench.core.appliance import default_host, default_open_browser
+from anolis_workbench.server import request_origin
 from anolis_workbench.server.routes import commission, compose, onboarding, operate, provision
 
 
@@ -114,11 +115,20 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):  # suppress noisy per-request logs
         pass
 
+    def _refuse_foreign(self) -> bool:
+        reason = request_origin.rejection(self.headers.get("Host"), self.headers.get("Origin"))
+        if reason is None:
+            return False
+        self._json(403, {"error": reason})
+        return True
+
     # ------------------------------------------------------------------
     # HTTP verb dispatch
     # ------------------------------------------------------------------
 
     def do_GET(self) -> None:
+        if self._refuse_foreign():
+            return
         path = self.path.split("?")[0]
         if path == "/api/projects":
             compose.list_projects(self)
@@ -164,6 +174,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._serve_static(path)
 
     def do_POST(self) -> None:
+        if self._refuse_foreign():
+            return
         path = self.path.split("?")[0]
         if path == "/api/provision/install":
             provision.start_install(self)
@@ -204,6 +216,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._not_found()
 
     def do_PUT(self) -> None:
+        if self._refuse_foreign():
+            return
         path = self.path.split("?")[0]
         if path.startswith("/api/projects/"):
             name, sub = self._parse_project_path(path)
@@ -217,6 +231,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._not_found()
 
     def do_DELETE(self) -> None:
+        if self._refuse_foreign():
+            return
         path = self.path.split("?")[0]
         if path.startswith("/api/projects/"):
             name, sub = self._parse_project_path(path)
