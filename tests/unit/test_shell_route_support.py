@@ -345,11 +345,16 @@ def test_runtime_proxy_returns_502_when_runtime_unreachable(workbench_server: di
     )
     assert project_status == 200, project_payload
 
-    runtime_port = _pick_free_port()
-    project_payload.setdefault("topology", {})
-    project_payload["topology"].setdefault("runtime", {})
-    project_payload["topology"]["runtime"]["http_bind"] = "127.0.0.1"
-    project_payload["topology"]["runtime"]["http_port"] = runtime_port
+    # The proxy targets the running variant's http bind/port. Point every
+    # variant at a port held by a bound, non-listening socket for the whole
+    # test: connects are refused and no other process can take the port.
+    # The template's own port (8080) would reach any runtime on this host.
+    closed_port_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    closed_port_sock.bind(("127.0.0.1", 0))
+    runtime_port = int(closed_port_sock.getsockname()[1])
+    for variant_doc in project_payload["variants"].values():
+        variant_doc["http"]["bind"] = "127.0.0.1"
+        variant_doc["http"]["port"] = runtime_port
 
     save_status, save_payload = _http_json(
         base_url,
@@ -358,6 +363,9 @@ def test_runtime_proxy_returns_502_when_runtime_unreachable(workbench_server: di
         body=project_payload,
     )
     assert save_status == 200, save_payload
+
+    _, saved_payload = _http_json(base_url, f"/api/projects/{urllib.parse.quote(project_name)}")
+    assert {v["http"]["port"] for v in saved_payload["variants"].values()} == {runtime_port}, saved_payload
 
     runner = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(60)"],
@@ -375,6 +383,7 @@ def test_runtime_proxy_returns_502_when_runtime_unreachable(workbench_server: di
         assert proxy_status == 502, proxy_payload
         assert "Runtime proxy failed" in str(proxy_payload.get("error")), proxy_payload
     finally:
+        closed_port_sock.close()
         if runner.poll() is None:
             runner.terminate()
             try:
