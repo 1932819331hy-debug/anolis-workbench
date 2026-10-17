@@ -13,6 +13,15 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-17
+
+### Upgrade notes
+
+- If you reach the workbench under a name other than an IP address,
+  `localhost` or the machine's hostname (plain or `.local`), such as a DNS
+  name or a reverse proxy's, set `ANOLIS_WORKBENCH_ALLOWED_HOSTS` to that
+  name, or the server answers 403.
+
 ### Security
 
 - The server refuses, with 403, a request whose `Host` does not name this
