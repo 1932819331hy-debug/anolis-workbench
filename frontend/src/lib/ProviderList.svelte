@@ -143,6 +143,10 @@
     if (compat) delete compat[id];
   }
 
+  // seedConfig and renameProvider keep provider.name equal to the id, so the
+  // form shows it rather than asking for it a second time.
+  const DERIVED_FIELDS = { "provider.name": "Follows the provider ID." };
+
   // Add-Provider asks for a kind and offers no default.
   let newKind = $state("");
 
@@ -465,7 +469,7 @@
           <details class="provider-configure" open>
             <summary>Configure</summary>
             <div class="provider-typed-form">
-              <SchemaForm {schema} value={cfgValue} {onChanged} />
+              <SchemaForm {schema} value={cfgValue} {onChanged} derivedFields={DERIVED_FIELDS} />
             </div>
           </details>
         {/if}

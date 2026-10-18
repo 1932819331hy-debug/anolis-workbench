@@ -4,6 +4,7 @@
   import SchemaFieldSelf from "./SchemaField.svelte";
   import {
     asObject,
+    authoredProperties,
     descriptionFor,
     fieldControl,
     isArraySchema,
@@ -11,7 +12,6 @@
     labelFor,
     parseI2c,
     placeholderFor,
-    properties,
     resolveConditionals,
     validateField,
     type SchemaNode,
@@ -29,6 +29,7 @@
     parent,
     onChanged,
     i2cImport = null,
+    derivedFields = {},
   }: {
     schema: SchemaNode;
     key: string;
@@ -36,6 +37,8 @@
     parent: UnknownRecord;
     onChanged: () => void;
     i2cImport: (() => unknown[] | null) | null;
+    /** Dotted paths, relative to `parent`, rendered read-only with their note. */
+    derivedFields?: Record<string, string>;
   } = $props();
 
   const label = $derived(labelFor(key, schema));
@@ -44,6 +47,15 @@
   const isArray = $derived(isArraySchema(schema));
   const control = $derived(fieldControl(schema));
   const value = $derived(parent[key]);
+  const derivedNote = $derived(derivedFields[key] ?? null);
+  const childDerived = $derived(
+    Object.fromEntries(
+      Object.entries(derivedFields)
+        .filter(([path]) => path.startsWith(`${key}.`))
+        .map(([path, note]) => [path.slice(key.length + 1), note]),
+    ),
+  );
+  const childProperties = $derived(isObject ? authoredProperties(schema) : []);
   const error = $derived(!isObject && !isArray ? validateField(schema, value, required) : null);
 
   // Nested object sections whose container doesn't exist yet render into a
@@ -106,12 +118,12 @@
 
 {#if isArray}
   <SchemaArray {schema} {key} {required} {parent} {onChanged} {i2cImport} />
-{:else if isObject}
+{:else if isObject && childProperties.length > 0}
   <fieldset class="schema-object">
     <legend>{label}</legend>
     {#if description}<span class="field-note">{description}</span>{/if}
     {#if childRecord && childConditionals}
-      {#each properties(schema) as [childKey, childSchema] (childKey)}
+      {#each childProperties as [childKey, childSchema] (childKey)}
         {#if !childConditionals.forbidden.has(childKey)}
           <SchemaFieldSelf
             schema={childSchema}
@@ -120,16 +132,23 @@
             parent={childRecord}
             onChanged={childChanged}
             {i2cImport}
+            derivedFields={childDerived}
           />
         {/if}
       {/each}
     {/if}
   </fieldset>
-{:else if control.control === "readonly"}
+{:else if isObject}
+  <!-- Nothing to author: every declared property is const. -->
+{:else if derivedNote !== null}
   <div class="form-group">
     <label>{label}</label>
-    <input type="text" value={String(control.value)} disabled />
-    {#if description}<span class="field-note">{description}</span>{/if}
+    <input
+      type="text"
+      value={value === undefined || value === null ? "" : String(value)}
+      readonly
+    />
+    <span class="field-note">{derivedNote}</span>
   </div>
 {:else if control.control === "select"}
   <div class="form-group">

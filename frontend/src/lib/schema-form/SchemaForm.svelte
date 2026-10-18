@@ -3,6 +3,7 @@
   import SchemaField from "./SchemaField.svelte";
   import {
     asObject,
+    authoredProperties,
     isArraySchema,
     isI2cField,
     itemsSchema,
@@ -21,10 +22,13 @@
     schema,
     value,
     onChanged,
+    derivedFields = {},
   }: {
     schema: SchemaNode;
     value: UnknownRecord;
     onChanged: () => void;
+    /** Dotted paths the caller owns, each with the note shown beside its read-only value. */
+    derivedFields?: Record<string, string>;
   } = $props();
 
   const conditionals = $derived(resolveConditionals(schema, value));
@@ -55,7 +59,7 @@
 </script>
 
 <div class="schema-form">
-  {#each properties(schema) as [key, node] (key)}
+  {#each authoredProperties(schema) as [key, node] (key)}
     {#if !conditionals.forbidden.has(key)}
       <SchemaField
         schema={node}
@@ -64,6 +68,7 @@
         parent={value}
         onChanged={handleChanged}
         i2cImport={hasDeviceAddresses ? importAddresses : null}
+        {derivedFields}
       />
     {/if}
   {/each}

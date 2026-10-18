@@ -60,6 +60,14 @@ export function properties(schema: SchemaNode): Array<[string, SchemaNode]> {
   });
 }
 
+/**
+ * Properties the user authors. A const property has exactly one legal value,
+ * which defaultsFor already seeds, so it is never rendered as a control.
+ */
+export function authoredProperties(schema: SchemaNode): Array<[string, SchemaNode]> {
+  return properties(schema).filter(([, node]) => node.const === undefined);
+}
+
 export function itemsSchema(schema: SchemaNode): SchemaNode | null {
   return asRecord(schema.items);
 }

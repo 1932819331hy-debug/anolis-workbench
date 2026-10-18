@@ -210,6 +210,82 @@ describe("ProviderList.svelte", () => {
     },
   );
 
+  /** Titles of every const-valued property in a schema, at any depth. */
+  function constTitles(node: UnknownRecord): string[] {
+    const out: string[] = [];
+    for (const child of Object.values(asObject(node.properties) ?? {})) {
+      const record = asObject(child);
+      if (!record) continue;
+      if (record.const !== undefined && typeof record.title === "string") out.push(record.title);
+      out.push(...constTitles(record));
+      const items = asObject(record.items);
+      if (items) out.push(...constTitles(items));
+    }
+    return out;
+  }
+
+  async function addKind(kind: string): Promise<ProjectDocument> {
+    const doc = reactive(createProjectDocument("demo"));
+    render(ProviderList, {
+      props: { doc, providerSchemas: allSchemasResponse(), onChanged: vi.fn() },
+    });
+    await fireEvent.change(screen.getByRole("combobox", { name: "Kind for the new provider" }), {
+      target: { value: kind },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add Provider" }));
+    return doc;
+  }
+
+  const NAMED_KINDS = VENDORED_KINDS.filter((kind) => {
+    const schema = asObject(loadEnvelope(kind).schema);
+    const provider = asObject(asObject(schema?.properties)?.provider);
+    return asObject(asObject(provider?.properties)?.name) !== null;
+  });
+
+  it.each(NAMED_KINDS)("%s: provider.name follows the provider id, read-only", async (kind) => {
+    const doc = await addKind(kind);
+    const id = `${kind}0`;
+
+    const group = (await screen.findByText("Provider name")).parentElement as HTMLElement;
+    const input = group.querySelector("input") as HTMLInputElement;
+    expect(input.value).toBe(id);
+    expect(input.readOnly || input.disabled).toBe(true);
+    expect(within(group).getByText("Follows the provider ID.")).toBeInTheDocument();
+
+    const idInput = document.querySelector(".provider-id-input") as HTMLInputElement;
+    await fireEvent.blur(idInput, { target: { value: "renamed" } });
+    expect(asObject(doc.providers.renamed.config.provider)?.name).toBe("renamed");
+    await waitFor(() => {
+      const after = screen.getByText("Provider name").parentElement as HTMLElement;
+      expect((after.querySelector("input") as HTMLInputElement).value).toBe("renamed");
+    });
+  });
+
+  const CONST_KINDS = VENDORED_KINDS.filter(
+    (kind) => constTitles(asObject(loadEnvelope(kind).schema)!).length > 0,
+  );
+
+  it("some vendored envelope declares a const property", () => {
+    expect(CONST_KINDS.length).toBeGreaterThan(0);
+  });
+
+  it.each(CONST_KINDS)(
+    "%s: const properties render no control but stay in the config",
+    async (kind) => {
+      const doc = await addKind(kind);
+      const schema = asObject(loadEnvelope(kind).schema)!;
+
+      await screen.findByText("Configure");
+      for (const title of constTitles(schema)) {
+        expect(screen.queryByText(title)).not.toBeInTheDocument();
+      }
+      // The const values are still seeded into the authored config.
+      const expected = defaultsFor(schema);
+      delete expected.provider; // name is the id, covered above
+      expect(doc.providers[`${kind}0`].config).toEqual(expect.objectContaining(expected));
+    },
+  );
+
   it("remove drops the provider from EVERY variant, not just the edited one", async () => {
     const doc = createProjectDocument("demo");
     doc.profile.runtime_profiles[AUTOMATION_VARIANT] = variantRelpath(AUTOMATION_VARIANT);
