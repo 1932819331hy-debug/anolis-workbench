@@ -39,6 +39,28 @@ def _managers_for(rel_path: str) -> list[dict]:
     ]
 
 
+def _deps(rel_path: str, text: str) -> list[tuple[str, str, str]]:
+    """(depName, currentValue, matched text) for every dep Renovate extracts.
+
+    A manager's depNameTemplate, when set, names the dep instead of a group."""
+    deps = []
+    for manager in _managers_for(rel_path):
+        for pattern in manager["matchStrings"]:
+            for match in _js_regex(pattern).finditer(text):
+                name = manager.get("depNameTemplate") or match.group("depName")
+                deps.append((name, match.group("currentValue"), match.group(0)))
+    return deps
+
+
+def _bump(rel_path: str, text: str, dep_name: str, new_value: str) -> str:
+    """Model Renovate's update: inside each matched text for the dep, every
+    occurrence of the current value becomes the new one."""
+    for name, current, matched in _deps(rel_path, text):
+        if name == dep_name:
+            text = text.replace(matched, matched.replace(current, new_value), 1)
+    return text
+
+
 def test_there_are_locks_to_track() -> None:
     assert LOCKS
 
@@ -79,12 +101,40 @@ def test_every_template_runtime_pin_is_tracked(profile: pathlib.Path) -> None:
     assert managers, f"no Renovate custom manager covers {rel_path}"
 
     text = profile.read_text(encoding="utf-8")
-    found: list[tuple[str, str]] = []
     for manager in managers:
         assert manager["datasourceTemplate"] == "github-releases"
-        for pattern in manager["matchStrings"]:
-            for match in _js_regex(pattern).finditer(text):
-                found.append((match.group("depName"), match.group("currentValue")))
 
     runtime = yaml.safe_load(text)["components"]["runtime"]
+    found = [(name, value) for name, value, _ in _deps(rel_path, text) if name == runtime["repo"]]
     assert found == [(runtime["repo"], str(runtime["version"]))]
+
+
+def test_a_sim_release_moves_both_sim_quickstart_pins() -> None:
+    """The template pins sim twice, under compatibility and components; a
+    bump that moved one would leave the two disagreeing."""
+    path = REPO_ROOT / "anolis_workbench" / "templates" / "sim-quickstart" / "machine-profile.yaml"
+    rel_path = path.relative_to(REPO_ROOT).as_posix()
+    text = path.read_text(encoding="utf-8")
+    before = yaml.safe_load(text)
+
+    after = yaml.safe_load(_bump(rel_path, text, "anolishq/anolis-provider-sim", "9.9.9"))
+
+    assert after["compatibility"]["providers"]["sim0"]["version"] == "9.9.9"
+    assert after["components"]["providers"]["sim"]["version"] == "9.9.9"
+    assert after["components"]["runtime"] == before["components"]["runtime"]
+
+
+@pytest.mark.parametrize("lock", LOCKS, ids=lambda p: p.relative_to(REPO_ROOT).as_posix())
+def test_a_release_moves_every_version_in_the_lock(lock: pathlib.Path) -> None:
+    """A bump that moved the tag but not the asset names fetched the old
+    asset from the new release and 404'd. Only the sha256s are left for the
+    sync script."""
+    rel_path = lock.relative_to(REPO_ROOT).as_posix()
+    text = lock.read_text(encoding="utf-8")
+    data = json.loads(text)
+    old = data["source"]["tag"].removeprefix("v")
+
+    bumped = _bump(rel_path, text, data["source"]["repo"], "9.9.9")
+
+    stale = [line.strip() for line in bumped.splitlines() if old in line and "sha256" not in line]
+    assert stale == []
