@@ -13,15 +13,23 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-18
+
 ### Upgrade notes
 
-- The workbench now listens on `127.0.0.1` on a Raspberry Pi and under the
-  `--workbench-service` systemd unit, as it already did elsewhere. Reach it
-  from another machine with `ssh -L 3010:127.0.0.1:3010 <user>@<host>`,
-  which the server and the install now print. An explicit
-  `ANOLIS_WORKBENCH_HOST` still sets the bind address. Re-run
-  `anolis-provision install --workbench-service` to rewrite an installed
-  unit.
+- The workbench now listens on `127.0.0.1` in Raspberry Pi appliance mode
+  and under the `--workbench-service` systemd unit, as it already did
+  elsewhere. Reach it from another machine with
+  `ssh -L 3010:127.0.0.1:3010 <user>@<host>`, which the server and the
+  install now print. An explicit `ANOLIS_WORKBENCH_HOST` still sets the
+  bind address.
+- Re-run `anolis-provision install --workbench-service` to rewrite an
+  installed unit and to give the service its copy of the runtime's API
+  token.
+- Install this release, and re-run `install --workbench-service`, before
+  upgrading the runtime to anolis 0.1.48. That runtime requires its API
+  token on loopback, and an older workbench sends none, so Operate would
+  get 401.
 
 ### Security
 
@@ -48,6 +56,56 @@ Historical note:
 - Reaching the workbench means being able to run programs as the service's
   user, since a project's host paths name the executables Launch starts.
   Treat access to the workbench as access to that account.
+
+### Added
+
+- Commission has a "Dev-launch variant" control that shows and sets which
+  runtime variant Launch runs (#513, closes #339). Compose's variant
+  selector now only picks what is being edited and is never saved. When
+  the two differ, Commission and Operate show a banner such as "Editing
+  automation; Launch runs manual"; Launch is not blocked. A variant that
+  exists only in unsaved Compose edits is listed but cannot be chosen
+  until it is saved, and removing a variant in Compose unsets a launch
+  variant that named it.
+
+### Changed
+
+- Vendored contracts synced to anolis 0.1.47 and anolis-provider-sim
+  0.2.8 (#511, #512). The runtime-http `/v0/events` description lists
+  `device_removed` and no longer lists `provider_health_change`; the sim
+  envelope changes only its `provider_version`.
+- The sim-quickstart template pins runtime 0.1.47 and sim 0.2.8, both
+  under `components` and in its `compatibility` entry (#511, #512), so a
+  new quickstart project carries no version-skew warning.
+- The install summaries' runtime API hint reads the token from
+  `/etc/anolis/runtime.env` and passes it to `curl -H @-` on stdin, so it
+  never reaches a command line, and points at `/v0/runtime/status`.
+
+### Fixed
+
+- Compose shows `provider.name` read-only, following the provider ID, and
+  no longer renders `const` properties as disabled inputs (#507, part of
+  #339). The const values are still written and still validate.
+- A field that a schema conditional makes required shows why beside the
+  required error, from the schema's own titles, for example "Required
+  because Discovery mode is 'Manual address list'" (#508, closes #485).
+- The "declared in the machine-profile but run by no runtime variant"
+  warning is derived when a project is read instead of stored in the
+  sidecar, so it clears once fixed (#505, closes #290). A stale copy in an
+  existing sidecar is no longer served and is dropped on the next save.
+- Discovery of a runtime the workbench did not start counts a `401` from
+  its token-less probe as a runtime answering, so a runtime that requires
+  its token on loopback is still found.
+- Under the systemd unit, the server's startup lines, the tunnel hint
+  among them, reach the journal (`PYTHONUNBUFFERED=1` and an explicit
+  flush).
+
+### CI
+
+- Renovate's lock manager now moves each lock's release asset names and a
+  provider lock's `provider_version` along with its tag, and the template
+  manager tracks the sim-quickstart template's sim pins as well as its
+  runtime pin (#515).
 
 ## [0.17.1] - 2026-10-17
 
