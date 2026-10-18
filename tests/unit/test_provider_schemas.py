@@ -5,10 +5,12 @@ import pathlib
 
 import provider_locks  # from scripts/, on the path via pytest's `pythonpath`
 import pytest
+import yaml
 
 from anolis_workbench.core import provider_schemas
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+SIM_QUICKSTART = REPO_ROOT / "anolis_workbench" / "templates" / "sim-quickstart" / "machine-profile.yaml"
 
 
 @pytest.fixture(autouse=True)
@@ -173,6 +175,17 @@ def test_a_padded_pin_is_not_a_skew():
     assert resolution.pinned_version == _packaged_version("bread")
     assert resolution.exact is True
     assert resolution.skew_message() is None
+
+
+def test_the_sim_quickstart_template_pins_the_packaged_sim():
+    """Onboarding creates projects from this template, so a pin behind the
+    vendored envelope puts a skew warning on every new quickstart project."""
+    profile = yaml.safe_load(SIM_QUICKSTART.read_text(encoding="utf-8"))
+    resolution = _resolve_for_profile(profile, "sim")
+
+    assert resolution.pinned_version == resolution.envelope_version
+    assert resolution.skew_message() is None
+    assert str(profile["compatibility"]["providers"]["sim0"]["version"]) == resolution.envelope_version
 
 
 def test_resolution_never_touches_the_network(monkeypatch):
