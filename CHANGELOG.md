@@ -13,6 +13,42 @@ Historical note:
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- The workbench now listens on `127.0.0.1` on a Raspberry Pi and under the
+  `--workbench-service` systemd unit, as it already did elsewhere. Reach it
+  from another machine with `ssh -L 3010:127.0.0.1:3010 <user>@<host>`,
+  which the server and the install now print. An explicit
+  `ANOLIS_WORKBENCH_HOST` still sets the bind address. Re-run
+  `anolis-provision install --workbench-service` to rewrite an installed
+  unit.
+
+### Security
+
+- No default serves the workbench beyond loopback. Appliance mode on a
+  Raspberry Pi and the `--workbench-service` unit previously bound
+  `0.0.0.0`, which let anyone who could reach the port use every page,
+  Operate included, with no login.
+- `--workbench-service` gives the service the installed runtime's API
+  token, and nothing else from the runtime's environment file. The install
+  copies it into `/etc/anolis/workbench-runtime-token`, a `0600` file owned
+  by the service's user, written atomically; it never appears in the unit,
+  a command line or the output, and uninstalling the service removes it.
+  Operate sends it only to a runtime on this machine (loopback,
+  `localhost`, or `0.0.0.0`/`::`), never to an
+  `ANOLIS_WORKBENCH_RUNTIME_URL` override or another host a project's
+  `http.bind` names, and an explicit `ANOLIS_WORKBENCH_RUNTIME_TOKEN` still
+  wins. Without a runtime token there is no copy and Operate sends none.
+- Operate refuses a project whose runtime `http.bind` is not a bare IP
+  address or hostname, such as one carrying userinfo, a path or a port.
+- Processes the workbench starts (a dev-launched runtime, preflight checks,
+  `install.sh`, ssh) no longer get `ANOLIS_WORKBENCH_RUNTIME_TOKEN` in their
+  environment. This is defence in depth only: a program the workbench
+  launches runs as the service's user and can read the token copy.
+- Reaching the workbench means being able to run programs as the service's
+  user, since a project's host paths name the executables Launch starts.
+  Treat access to the workbench as access to that account.
+
 ## [0.17.1] - 2026-10-17
 
 ### Upgrade notes

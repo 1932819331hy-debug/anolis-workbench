@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+from anolis_workbench.core.child_env import child_env
+
 # Allowlist of binaries that executors are permitted to invoke.
 # Commands not in this set are rejected to prevent command injection.
 #
@@ -114,7 +116,9 @@ class LocalExecutor(Executor):
     ) -> RunResult:
         safe_cmd = _validate_command(cmd)
         full_cmd = (["sudo"] + safe_cmd) if sudo else safe_cmd
-        result = subprocess.run(full_cmd, input=input, capture_output=True, timeout=timeout if timeout else 30)
+        result = subprocess.run(
+            full_cmd, input=input, capture_output=True, timeout=timeout if timeout else 30, env=child_env()
+        )
         return RunResult(
             returncode=result.returncode,
             stdout=result.stdout.decode(errors="replace"),
@@ -162,6 +166,7 @@ class SubprocessSSHExecutor(Executor):
             input=input,
             capture_output=True,
             timeout=timeout if timeout else 60,
+            env=child_env(),
         )
         return RunResult(
             returncode=result.returncode,
@@ -172,7 +177,7 @@ class SubprocessSSHExecutor(Executor):
     def write_file(self, path: str, data: bytes) -> None:
         # Write via ssh cat > path
         ssh_cmd = self._ssh_base() + [f"cat > {shlex.quote(path)}"]
-        result = subprocess.run(ssh_cmd, input=data, capture_output=True, timeout=60)
+        result = subprocess.run(ssh_cmd, input=data, capture_output=True, timeout=60, env=child_env())
         if result.returncode != 0:
             stderr = result.stderr.decode(errors="replace").strip()
             raise OSError(f"Failed to write {path} on remote: {stderr}")

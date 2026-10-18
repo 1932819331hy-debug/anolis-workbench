@@ -44,11 +44,19 @@ Requires Python 3.10+. Open `http://127.0.0.1:3010` in a browser after starting.
 pipx install anolis-workbench && anolis-workbench
 ```
 
-On a Raspberry Pi the server binds to all interfaces and opens no browser,
-so browse to `http://<pi>:3010` from another machine on the network. It has
-no login: anyone who can reach that port can use the workbench. Keep it on a
-trusted network.
-`ANOLIS_WORKBENCH_HOST=127.0.0.1` keeps it on the Pi itself.
+On a Raspberry Pi the server opens no browser. Like everywhere else it
+listens on `127.0.0.1` only: the workbench has no login, so anyone who can
+reach its port could use it. Reach it from another machine over an ssh
+tunnel, then browse to `http://127.0.0.1:3010` on that machine:
+
+```sh
+ssh -L 3010:127.0.0.1:3010 <user>@<pi>
+```
+
+The server prints this command when it starts headless. Setting
+`ANOLIS_WORKBENCH_HOST` (for example to `0.0.0.0`) overrides the bind
+address; do that only on a network where everyone who can reach the port
+may use the workbench.
 
 The server answers only requests addressed to this machine: an IP address,
 `localhost`, or the machine's hostname (plain or `.local`). To reach it
@@ -58,8 +66,24 @@ browser page must also come from the workbench's own address.
 
 To start the workbench at boot, add `--workbench-service` to the install,
 which also installs a systemd service for the workbench. It asks for your
-sudo password, and the service runs as you. The service always binds to all
-interfaces:
+sudo password, and the service runs as you. The service binds `127.0.0.1`;
+the install prints the ssh tunnel command to reach it. When the installed
+runtime has an API token (`ANOLIS_API_TOKEN` in `/etc/anolis/runtime.env`),
+the install copies that token alone into
+`/etc/anolis/workbench-runtime-token`, a `0600` file owned by the service's
+user, so Operate can reach a runtime that requires the token on loopback.
+The workbench sends it only to a runtime on this machine. It keeps the
+token out of the environment of the processes it starts, but a program it
+launches runs as the same user and can still read the file. Uninstalling the
+service removes the copy.
+
+Anyone who can reach the workbench while the service runs, as a local
+account on the host or over an ssh tunnel to it, can run programs as the
+service's user: a project's host paths name the executables Launch starts.
+That is more than the workbench's runtime access, so treat access to the
+workbench as access to that account.
+
+Re-run the install after rotating the token:
 
 ```sh
 anolis-provision install --workbench-service

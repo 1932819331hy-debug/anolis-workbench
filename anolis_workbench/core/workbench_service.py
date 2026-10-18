@@ -1,7 +1,12 @@
 """Systemd service for the Anolis Workbench web server (appliance mode).
 
 Generates and installs an anolis-workbench.service unit that auto-starts
-the workbench UI on boot, making it accessible from any LAN device.
+the workbench UI on boot. It binds loopback: the workbench has no login, so
+other machines reach it over an ssh tunnel.
+
+When the installed runtime has an API token, the install copies that token
+alone, never the rest of the runtime's environment file, into a 0600 file
+owned by the service's user, which the workbench reads.
 """
 
 from __future__ import annotations
@@ -29,8 +34,9 @@ _UNIT_FILE = dedent("""\
     ExecStart={exec_start}
     Restart=on-failure
     RestartSec=5s
-    Environment=ANOLIS_WORKBENCH_HOST=0.0.0.0
+    Environment=ANOLIS_WORKBENCH_HOST=127.0.0.1
     Environment=ANOLIS_WORKBENCH_OPEN_BROWSER=0
+    Environment=PYTHONUNBUFFERED=1
     StandardOutput=journal
     StandardError=journal
 
@@ -40,6 +46,38 @@ _UNIT_FILE = dedent("""\
 
 SERVICE_NAME = "anolis-workbench.service"
 _SYSTEMD_UNIT_DIR = Path("/etc/systemd/system")
+
+# The runtime's install.sh keeps its API token, as ANOLIS_API_TOKEN, in this
+# root-only file, alongside other secrets (INFLUXDB_TOKEN, for one). Only the
+# token is copied out, into a 0600 file of its own owned by the service's
+# user. The unit does not name the file, so deleting it can never stop the
+# service from starting; the workbench reads it, and a missing or empty file
+# means no token.
+RUNTIME_ENV_FILE = Path("/etc/anolis/runtime.env")
+RUNTIME_TOKEN_FILE = Path("/etc/anolis/workbench-runtime-token")
+_NO_TOKEN_EXIT = 3
+
+# Runs as root: copies the token value (only) from $1 to $2, owned by $3 at
+# mode 0600. mktemp creates the file 0600, and the owner is set, before
+# anything is written to it; the rename makes the update atomic. The value
+# never reaches argv or output. Exits 3, after removing any stale copy, when
+# there is no token to copy.
+_TOKEN_SYNC_SCRIPT = """\
+set -eu
+src=$1
+dst=$2
+owner=$3
+if [ ! -f "$src" ] || ! grep -qE '^ANOLIS_API_TOKEN=[^[:space:]]' "$src"; then
+    rm -f -- "$dst"
+    exit 3
+fi
+tmp=$(mktemp "$dst.XXXXXX")
+trap 'rm -f -- "$tmp"' EXIT
+chmod 0600 "$tmp"
+chown -- "$owner" "$tmp"
+sed -n 's/^ANOLIS_API_TOKEN=//p' "$src" | tail -n 1 | tr -d '\\n' > "$tmp"
+mv -f -- "$tmp" "$dst"
+"""
 
 
 @dataclass
@@ -84,6 +122,31 @@ def render_unit_file(user: str, executable: str | None = None) -> str:
     return _UNIT_FILE.format(user=user, exec_start=exec_start)
 
 
+def read_runtime_token() -> str:
+    """The copied runtime token, or "" when there is no readable copy."""
+    try:
+        return RUNTIME_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def sync_runtime_token(exe: Executor, owner: str) -> bool:
+    """Copy the runtime's API token into RUNTIME_TOKEN_FILE, owned by `owner`, under sudo.
+
+    Returns True when a token was copied, False when the runtime has none
+    (no runtime.env, or no ANOLIS_API_TOKEN in it). Re-running it picks up
+    a rotated token.
+    """
+    cmd = ["sh", "-c", _TOKEN_SYNC_SCRIPT, "sh", str(RUNTIME_ENV_FILE), str(RUNTIME_TOKEN_FILE), owner]
+    result = exe.run(cmd, sudo=True)
+    if result.returncode == 0:
+        return True
+    if result.returncode == _NO_TOKEN_EXIT:
+        return False
+    detail = (result.stderr or result.stdout).strip()
+    raise OSError(f"copying the runtime API token failed (exit {result.returncode}): {detail}")
+
+
 def _sudo(exe: Executor, cmd: list[str]) -> None:
     result = exe.run(cmd, sudo=True)
     if result.returncode != 0:
@@ -105,10 +168,11 @@ def install_service(
         executor: Command executor (defaults to local).
     """
     exe = executor or LocalExecutor()
-    unit_content = render_unit_file(user, executable)
     unit_path = _SYSTEMD_UNIT_DIR / SERVICE_NAME
 
     try:
+        sync_runtime_token(exe, user)
+        unit_content = render_unit_file(user, executable)
         # Staged in a private temp dir, then copied into place under sudo:
         # the unit dir is root's, and the caller is usually not.
         with tempfile.TemporaryDirectory(prefix="anolis-workbench-unit-") as td:
@@ -141,14 +205,15 @@ def _sudo_unless_not_loaded(exe: Executor, cmd: list[str]) -> None:
 
 
 def uninstall_service(executor: Executor | None = None) -> WorkbenchServiceResult:
-    """Stop, disable, and remove the workbench systemd service."""
+    """Stop, disable, and remove the workbench systemd service and its copy
+    of the runtime token (rm -f: a missing copy is fine)."""
     exe = executor or LocalExecutor()
     unit_path = _SYSTEMD_UNIT_DIR / SERVICE_NAME
 
     try:
         _sudo_unless_not_loaded(exe, ["systemctl", "stop", SERVICE_NAME])
         _sudo_unless_not_loaded(exe, ["systemctl", "disable", SERVICE_NAME])
-        _sudo(exe, ["rm", "-f", str(unit_path)])
+        _sudo(exe, ["rm", "-f", str(unit_path), str(RUNTIME_TOKEN_FILE)])
         _sudo(exe, ["systemctl", "daemon-reload"])
     except Exception as exc:
         return WorkbenchServiceResult(installed=False, enabled=False, started=False, error=str(exc))

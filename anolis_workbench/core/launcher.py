@@ -21,6 +21,7 @@ import yaml
 
 from anolis_workbench.core import canonical, provider_schemas
 from anolis_workbench.core import paths as paths_module
+from anolis_workbench.core.child_env import child_env
 
 _state: dict = {
     "project": None,  # active project name
@@ -200,8 +201,15 @@ def _discover_running_runtime(clean_stale: bool = False) -> dict | None:
 
 
 def _runtime_alive(bind: str, port: int, timeout_s: float = 0.5) -> bool:
-    """True if an anolis-runtime answers /v0/runtime/status on bind:port."""
+    """True if an anolis-runtime answers /v0/runtime/status on bind:port.
+
+    The probe sends no token. A runtime that requires one on loopback answers
+    401, which still proves a runtime is there, so 401 counts as alive. A
+    refused connection, a timeout, any other error status, and a 200 without
+    a version are not alive.
+    """
     import json as _json
+    import urllib.error
     import urllib.request
 
     url = f"http://{bind}:{port}/v0/runtime/status"
@@ -210,6 +218,8 @@ def _runtime_alive(bind: str, port: int, timeout_s: float = 0.5) -> bool:
             if resp.status != 200:
                 return False
             return "version" in _json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return exc.code == 401
     except Exception:
         return False
 
@@ -493,6 +503,7 @@ def _check_config_binary(check_name: str, exe: pathlib.Path | None, yaml_path: p
             capture_output=True,
             text=True,
             timeout=10,
+            env=child_env(),
         )
         if result.returncode == 0:
             return {"name": check_name, "ok": True, "error": None, "hint": None}
@@ -525,6 +536,7 @@ def _check_host_binary(check_name: str, exe: pathlib.Path | None, yaml_path: pat
             capture_output=True,
             text=True,
             timeout=10,
+            env=child_env(),
         )
     except subprocess.TimeoutExpired:
         return {"name": check_name, "ok": False, "error": "Timed out (10s)", "hint": None}
@@ -593,6 +605,7 @@ def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
         cwd=str(paths_module.DATA_ROOT),
         bufsize=1,
         text=True,
+        env=child_env(),
     )
 
     # Write running.json
@@ -699,6 +712,7 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
         cwd=str(paths_module.DATA_ROOT),
         bufsize=1,
         text=True,
+        env=child_env(),
     )
 
     running_data = {

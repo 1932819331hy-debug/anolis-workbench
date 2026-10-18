@@ -16,7 +16,7 @@ from typing import cast
 from anolis_workbench.core import paths as paths_module
 from anolis_workbench.core import projects as projects_module
 from anolis_workbench.core import provider_schemas
-from anolis_workbench.core.appliance import default_host, default_open_browser
+from anolis_workbench.core.appliance import DEFAULT_PORT, default_host, default_open_browser, tunnel_hint
 from anolis_workbench.server import request_origin
 from anolis_workbench.server.routes import commission, compose, onboarding, operate, provision
 
@@ -68,7 +68,7 @@ def resolve_config(
     """
     return ServerConfig(
         host=host if host is not None else (os.getenv("ANOLIS_WORKBENCH_HOST") or default_host()),
-        port=port if port is not None else _env_int("ANOLIS_WORKBENCH_PORT", 3010),
+        port=port if port is not None else _env_int("ANOLIS_WORKBENCH_PORT", DEFAULT_PORT),
         open_browser=(
             open_browser
             if open_browser is not None
@@ -397,6 +397,15 @@ class _WorkbenchServer(ThreadingHTTPServer):
     config: ServerConfig
 
 
+def startup_messages(config: ServerConfig) -> list[str]:
+    """What the server prints on start. A headless loopback server (the
+    systemd service, appliance mode) also says how to tunnel to it."""
+    lines = [f"Anolis Workbench is running at http://{config.host}:{config.port}", "Close this window to stop."]
+    if config.host in ("127.0.0.1", "localhost", "::1") and not config.open_browser:
+        lines.append(tunnel_hint(config.port))
+    return lines
+
+
 def main(
     host: str | None = None,
     port: int | None = None,
@@ -408,8 +417,10 @@ def main(
     server = _WorkbenchServer((config.host, config.port), _Handler)
     server.config = config
     url = f"http://{config.host}:{config.port}"
-    print(f"Anolis Workbench is running at {url}")
-    print("Close this window to stop.")
+    # flush: under systemd stdout is a pipe to journald, block-buffered, and
+    # a stop by SIGTERM would discard the buffer and these lines with it.
+    for line in startup_messages(config):
+        print(line, flush=True)
     if config.open_browser:
         threading.Thread(target=_open_browser, args=(url,), daemon=True).start()
     try:

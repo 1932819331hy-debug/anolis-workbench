@@ -13,6 +13,11 @@ from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 if TYPE_CHECKING:
     from anolis_workbench.core import fleet as fleet_module
 
+# Prints the runtime's API token as an Authorization header, for curl to read
+# on stdin (-H @-) so the token never reaches a command line. The same form
+# the runtime's own docs give; the summaries only ever print this command.
+_TOKEN_HEADER_CMD = "sudo sed -n 's/^ANOLIS_API_TOKEN=/Authorization: Bearer /p' /etc/anolis/runtime.env"
+
 
 def _name_arg(value: str) -> str:
     """--project and --template name directories under the workspace and
@@ -483,6 +488,7 @@ def _run_install(args: argparse.Namespace) -> int:
         return 1
 
     # Workbench systemd service (appliance mode, if requested and not dry-run)
+    workbench_installed = False
     if getattr(args, "workbench_service", False) and not args.dry_run:
         from anolis_workbench.core import workbench_service
 
@@ -497,6 +503,7 @@ def _run_install(args: argparse.Namespace) -> int:
             )
             return 1
         _print_progress("systemd", "Workbench service enabled and started")
+        workbench_installed = True
 
     # Print summary
     print()
@@ -515,7 +522,14 @@ def _run_install(args: argparse.Namespace) -> int:
         print()
         print("Next steps:")
         print("  systemctl status anolis-runtime")
-        print("  curl http://127.0.0.1:8080/v0/status   # runtime API")
+        print("  # runtime API; the token goes to curl on stdin, never in argv:")
+        print(f"  {_TOKEN_HEADER_CMD} \\")
+        print("    | curl -s -H @- http://127.0.0.1:8080/v0/runtime/status")
+        if workbench_installed:
+            from anolis_workbench.core.appliance import tunnel_hint
+
+            print()
+            print(tunnel_hint())
     print("─" * 60)
     return 0
 
@@ -682,7 +696,9 @@ def _run_remote(args: argparse.Namespace) -> int:
     print()
     print("Next steps:")
     print(f"  ssh {user}@{host} systemctl status anolis-runtime")
-    print(f"  curl http://{host}:8080/v0/status   # runtime API")
+    print("  # runtime API; the token goes to curl on stdin, never in argv:")
+    print(f'  ssh {user}@{host} "{_TOKEN_HEADER_CMD}" \\')
+    print(f"    | curl -s -H @- http://{host}:8080/v0/runtime/status")
     print("─" * 60)
     return 0
 

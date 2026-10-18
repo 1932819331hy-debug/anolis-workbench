@@ -16,6 +16,8 @@ from typing import Any, Iterator
 import jsonschema
 import yaml
 
+from anolis_workbench.core.child_env import child_env
+
 
 class PackageValidationError(RuntimeError):
     """Raised when a handoff package fails validation."""
@@ -358,6 +360,7 @@ def _validate_replay(
         check=False,
         capture_output=True,
         text=True,
+        env=child_env(),
     )
     if proc.returncode != 0:
         stderr = proc.stderr.strip()

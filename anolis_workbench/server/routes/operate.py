@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 from anolis_workbench.core import launcher as launcher_module
 from anolis_workbench.core import projects as projects_module
+from anolis_workbench.core import workbench_service
 
 _HOP_BY_HOP_HEADERS = {
     "connection",
@@ -24,6 +28,59 @@ _HOP_BY_HOP_HEADERS = {
 def runtime_url_override() -> str:
     """The remote runtime the proxy targets instead of the launched one, or ""."""
     return os.environ.get("ANOLIS_WORKBENCH_RUNTIME_URL", "").strip()
+
+
+# One DNS label; a bind is an IP address or dot-separated labels, nothing else.
+_LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+_HOSTNAME = re.compile(rf"{_LABEL}(?:\.{_LABEL})*")
+
+
+def _bind_host(bind: str) -> str | None:
+    """A project's http.bind as the host part of a URL, or None if it is not
+    a bare address. Userinfo, a path, a fragment or a port would let the
+    project point the proxy somewhere the bind does not name."""
+    bracketed = bind.startswith("[") and bind.endswith("]")
+    try:
+        address = ipaddress.ip_address(bind[1:-1] if bracketed else bind)
+    except ValueError:
+        return bind if not bracketed and _HOSTNAME.fullmatch(bind) else None
+    if address.version == 6:
+        return f"[{address}]"
+    return None if bracketed else str(address)
+
+
+def is_local_target(base_url: str) -> bool:
+    """True when the URL's host is this machine: loopback, localhost, or the
+    unspecified address (0.0.0.0, ::), which connects locally."""
+    host = urllib.parse.urlsplit(base_url).hostname
+    if host is None:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_unspecified
+
+
+def runtime_token(target_base: str) -> str:
+    """The bearer token the proxy sends to target_base, or "". Never logged.
+
+    ANOLIS_WORKBENCH_RUNTIME_TOKEN wins. Otherwise the local runtime's token,
+    from the copy install --workbench-service writes. That one
+    goes only to a target on this machine: never to an
+    ANOLIS_WORKBENCH_RUNTIME_URL override, and never to a host a project's
+    http.bind names.
+    """
+    explicit = os.environ.get("ANOLIS_WORKBENCH_RUNTIME_TOKEN", "").strip()
+    if explicit:
+        return explicit
+    if runtime_url_override():
+        return ""
+    if not is_local_target(target_base):
+        return ""
+    return workbench_service.read_runtime_token()
 
 
 def _runtime_base() -> tuple[str | None, str | None, int]:
@@ -58,6 +115,9 @@ def _runtime_base() -> tuple[str | None, str | None, int]:
 
     if not isinstance(bind, str) or bind == "":
         bind = "127.0.0.1"
+    host = _bind_host(bind)
+    if host is None:
+        return None, "Runtime bind address is invalid", 500
     if isinstance(port, str):
         try:
             port = int(port)
@@ -66,7 +126,7 @@ def _runtime_base() -> tuple[str | None, str | None, int]:
     if not isinstance(port, int) or isinstance(port, bool):
         return None, "Runtime port is invalid", 500
 
-    return f"http://{bind}:{port}", None, 200
+    return f"http://{host}:{port}", None, 200
 
 
 def proxy_runtime(handler, method: str, raw_path: str) -> None:
@@ -87,10 +147,9 @@ def proxy_runtime(handler, method: str, raw_path: str) -> None:
         if value:
             headers[key] = value
 
-    # Bearer auth for remote runtimes; never logged. Loopback runtimes are
-    # auth-exempt by default, so this is a no-op for the local-launch path
-    # unless the operator sets a token explicitly.
-    token = os.environ.get("ANOLIS_WORKBENCH_RUNTIME_TOKEN", "").strip()
+    # Bearer auth; never logged. The runtime may require the token on
+    # loopback too; runtime_token() hands the copied one only to this machine.
+    token = runtime_token(runtime_base)
     if token:
         headers["Authorization"] = f"Bearer {token}"
 

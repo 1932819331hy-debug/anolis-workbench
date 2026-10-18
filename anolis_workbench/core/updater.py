@@ -15,6 +15,8 @@ from typing import Optional
 
 import requests
 
+from anolis_workbench.core.child_env import child_env
+
 logger = logging.getLogger(__name__)
 
 GITHUB_REPO = "anolishq/anolis-workbench"
@@ -154,6 +156,7 @@ def perform_update(
             capture_output=True,
             text=True,
             timeout=300,
+            env=child_env(),
         )
         logger.info("Update output: %s", result.stdout)
         return UpdateResult(success=True, version=target_version)
