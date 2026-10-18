@@ -210,6 +210,27 @@ describe("ProviderList.svelte", () => {
     },
   );
 
+  it("a newly added bread provider says why its empty address list is required", async () => {
+    const doc = reactive(createProjectDocument("demo"));
+    render(ProviderList, {
+      props: { doc, providerSchemas: schemasResponse(), onChanged: vi.fn() },
+    });
+    await fireEvent.change(screen.getByRole("combobox", { name: "Kind for the new provider" }), {
+      target: { value: "bread" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add Provider" }));
+
+    // The seeded default and its validation stay as they are.
+    expect(doc.providers.bread0.config.discovery).toEqual({ mode: "manual" });
+    const group = (await screen.findByText("Manual addresses")).closest(
+      ".schema-array",
+    ) as HTMLElement;
+    expect(within(group).getByText("Required — add at least one entry.")).toBeInTheDocument();
+    expect(
+      within(group).getByText("Required because Discovery mode is 'Manual address list'"),
+    ).toBeInTheDocument();
+  });
+
   /** Titles of every const-valued property in a schema, at any depth. */
   function constTitles(node: UnknownRecord): string[] {
     const out: string[] = [];

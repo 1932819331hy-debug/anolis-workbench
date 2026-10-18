@@ -65,6 +65,7 @@
         schema={node}
         {key}
         required={conditionals.required.has(key)}
+        requiredReason={conditionals.reasons.get(key) ?? null}
         parent={value}
         onChanged={handleChanged}
         i2cImport={hasDeviceAddresses ? importAddresses : null}

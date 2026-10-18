@@ -30,6 +30,8 @@ export type FieldControl =
 export interface Conditionals {
   required: Set<string>;
   forbidden: Set<string>;
+  /** Why a conditionally required key is required, in the schema's own titles. */
+  reasons: Map<string, string>;
 }
 
 /** Narrow an unknown to a plain object (the shape guard used across the form). */
@@ -108,26 +110,45 @@ export function enumOptions(schema: SchemaNode): EnumOption[] | null {
   return options;
 }
 
+function propertyLabel(schema: SchemaNode, key: string): string {
+  return labelFor(key, asRecord(asRecord(schema.properties)?.[key]) ?? {});
+}
+
+/** "Discovery mode is 'Manual address list'": a property's title and its value's enum title. */
+function describeValue(schema: SchemaNode, key: string, value: unknown): string {
+  const prop = asRecord(asRecord(schema.properties)?.[key]) ?? {};
+  const option = enumOptions(prop)?.find((o) => o.value === value);
+  const shown = option ? option.title : typeof value === "string" ? value : JSON.stringify(value);
+  return `${propertyLabel(schema, key)} is '${shown}'`;
+}
+
 /**
  * Effective required/forbidden property sets for an object schema given its
  * current value: static `required`, `dependentRequired`, plus every matching
  * allOf/if(const+required)/then branch (`then.required` adds requirements,
- * `then.properties: {k: false}` forbids keys).
+ * `then.properties: {k: false}` forbids keys). Each conditionally required
+ * key carries a reason naming the condition that made it required.
  */
 export function resolveConditionals(schema: SchemaNode, value: unknown): Conditionals {
   const required = new Set<string>();
   const forbidden = new Set<string>();
+  const reasons = new Map<string, string>();
   const record = asRecord(value) ?? {};
 
   if (Array.isArray(schema.required)) {
     for (const key of schema.required) if (typeof key === "string") required.add(key);
   }
+  const requireFor = (key: string, reason: string): void => {
+    required.add(key);
+    reasons.set(key, reason);
+  };
 
   const dependent = asRecord(schema.dependentRequired);
   if (dependent) {
     for (const [trigger, needs] of Object.entries(dependent)) {
       if (record[trigger] === undefined || !Array.isArray(needs)) continue;
-      for (const key of needs) if (typeof key === "string") required.add(key);
+      const reason = `Required because ${propertyLabel(schema, trigger)} is set`;
+      for (const key of needs) if (typeof key === "string") requireFor(key, reason);
     }
   }
 
@@ -140,7 +161,13 @@ export function resolveConditionals(schema: SchemaNode, value: unknown): Conditi
     if (!ifMatches(condition, record)) continue;
 
     if (Array.isArray(consequence.required)) {
-      for (const key of consequence.required) if (typeof key === "string") required.add(key);
+      const when = Object.keys(asRecord(condition.properties) ?? {})
+        .map((key) => describeValue(schema, key, record[key]))
+        .join(" and ");
+      const reason = `Required because ${when}`;
+      for (const key of consequence.required) {
+        if (typeof key === "string") requireFor(key, reason);
+      }
     }
     const thenProps = asRecord(consequence.properties);
     if (thenProps) {
@@ -151,7 +178,7 @@ export function resolveConditionals(schema: SchemaNode, value: unknown): Conditi
   }
 
   for (const key of forbidden) required.delete(key);
-  return { required, forbidden };
+  return { required, forbidden, reasons };
 }
 
 function ifMatches(condition: UnknownRecord, record: UnknownRecord): boolean {

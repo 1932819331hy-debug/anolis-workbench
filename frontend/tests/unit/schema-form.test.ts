@@ -125,6 +125,45 @@ describe("resolveConditionals", () => {
   });
 });
 
+describe("resolveConditionals reasons", () => {
+  it("names the if/then condition with the schema's own titles", () => {
+    const discovery = prop(bread, "discovery");
+    const { reasons } = resolveConditionals(discovery, { mode: "manual" });
+    expect(reasons.get("addresses")).toBe(
+      "Required because Discovery mode is 'Manual address list'",
+    );
+  });
+
+  it("names a dependentRequired trigger", () => {
+    const simulation = prop(sim, "simulation");
+    const { reasons } = resolveConditionals(simulation, {
+      mode: "sim",
+      ambient_signal_path: "x/y",
+    });
+    expect(reasons.get("ambient_temp_c")).toBe("Required because Ambient signal path is set");
+    expect(reasons.get("tick_rate_hz")).toBe(
+      "Required because Simulation mode is 'External simulation engine'",
+    );
+  });
+
+  it("gives no reason for a statically required key", () => {
+    const simulation = prop(sim, "simulation");
+    expect(resolveConditionals(simulation, { mode: "inert" }).reasons.size).toBe(0);
+    expect(resolveConditionals(prop(bread, "discovery"), {}).reasons.size).toBe(0);
+  });
+
+  it("falls back to the key and raw value when the schema has no titles", () => {
+    const schema: SchemaNode = {
+      type: "object",
+      properties: { kind: { type: "string" }, extra: { type: "string" } },
+      allOf: [{ if: { properties: { kind: { const: "b" } } }, then: { required: ["extra"] } }],
+    };
+    expect(resolveConditionals(schema, { kind: "b" }).reasons.get("extra")).toBe(
+      "Required because kind is 'b'",
+    );
+  });
+});
+
 describe("defaultsFor", () => {
   it("bread: fills hardware defaults, provider name default, no invented bus_path", () => {
     const seeded = defaultsFor(bread);
@@ -171,7 +210,12 @@ describe("fieldControl", () => {
 
   it("integer bounds map to a number control", () => {
     const watchdog = prop(deviceItems(bread), "command_watchdog_ms");
-    expect(fieldControl(watchdog)).toEqual({ control: "number", integer: true, min: 0, max: 65535 });
+    expect(fieldControl(watchdog)).toEqual({
+      control: "number",
+      integer: true,
+      min: 0,
+      max: 65535,
+    });
   });
 
   it("bus_path is text with placeholder", () => {
@@ -245,7 +289,9 @@ describe("uniqueViolations", () => {
       ],
     };
     const violations = uniqueViolations(bread, config);
-    expect(violations.some((v) => v.path === "$.devices" && v.message.includes("address"))).toBe(true);
+    expect(violations.some((v) => v.path === "$.devices" && v.message.includes("address"))).toBe(
+      true,
+    );
   });
 
   it("flags duplicate scalar addresses in discovery.addresses", () => {

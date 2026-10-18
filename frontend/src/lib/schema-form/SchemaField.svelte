@@ -26,6 +26,7 @@
     schema,
     key,
     required,
+    requiredReason = null,
     parent,
     onChanged,
     i2cImport = null,
@@ -34,6 +35,8 @@
     schema: SchemaNode;
     key: string;
     required: boolean;
+    /** Why `required` holds when a schema conditional made it so. */
+    requiredReason?: string | null;
     parent: UnknownRecord;
     onChanged: () => void;
     i2cImport: (() => unknown[] | null) | null;
@@ -57,6 +60,7 @@
   );
   const childProperties = $derived(isObject ? authoredProperties(schema) : []);
   const error = $derived(!isObject && !isArray ? validateField(schema, value, required) : null);
+  const reason = $derived(error === "Required" ? requiredReason : null);
 
   // Nested object sections whose container doesn't exist yet render into a
   // local draft; the draft is committed to the document on the first child
@@ -117,7 +121,7 @@
 </script>
 
 {#if isArray}
-  <SchemaArray {schema} {key} {required} {parent} {onChanged} {i2cImport} />
+  <SchemaArray {schema} {key} {required} {requiredReason} {parent} {onChanged} {i2cImport} />
 {:else if isObject && childProperties.length > 0}
   <fieldset class="schema-object">
     <legend>{label}</legend>
@@ -129,6 +133,7 @@
             schema={childSchema}
             key={childKey}
             required={childConditionals.required.has(childKey)}
+            requiredReason={childConditionals.reasons.get(childKey) ?? null}
             parent={childRecord}
             onChanged={childChanged}
             {i2cImport}
@@ -168,6 +173,7 @@
     </select>
     {#if description}<span class="field-note">{description}</span>{/if}
     {#if error}<span class="field-error">{error}</span>{/if}
+    {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {:else if control.control === "checkbox"}
   <div class="form-group form-group-inline">
@@ -197,6 +203,7 @@
     />
     {#if description}<span class="field-note">{description}</span>{/if}
     {#if error}<span class="field-error">{error}</span>{/if}
+    {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {:else if control.control === "i2c"}
   <div class="form-group">
@@ -214,6 +221,7 @@
     />
     {#if description}<span class="field-note">{description}</span>{/if}
     {#if error}<span class="field-error">{error}</span>{/if}
+    {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {:else}
   <div class="form-group">
@@ -229,5 +237,6 @@
     />
     {#if description}<span class="field-note">{description}</span>{/if}
     {#if error}<span class="field-error">{error}</span>{/if}
+    {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {/if}

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import { describe, expect, it, vi } from "vitest";
 
 import type { UnknownRecord } from "../../src/lib/contracts";
@@ -111,6 +111,26 @@ describe("SchemaForm.svelte (bread envelope)", () => {
     expect(onChanged).toHaveBeenCalled();
   });
 
+  it("explains a conditionally required empty list beside it, and only while empty", async () => {
+    const config = breadConfig();
+    delete (config.discovery as UnknownRecord).addresses;
+    render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged: vi.fn() } });
+
+    const hint = "Required because Discovery mode is 'Manual address list'";
+    const group = screen.getByText("Manual addresses").closest(".schema-array") as HTMLElement;
+    expect(within(group).getByText(hint)).toBeInTheDocument();
+
+    await fireEvent.click(within(group).getByRole("button", { name: "+ Add" }));
+    const input = group.querySelector(".schema-array-scalar-row input") as HTMLInputElement;
+    await fireEvent.change(input, { target: { value: "0x0A" } });
+
+    expect((config.discovery as UnknownRecord).addresses).toEqual(["0x0A"]);
+    await waitFor(() => {
+      expect(screen.queryByText(hint)).not.toBeInTheDocument();
+    });
+    expect(within(group).queryByText(/Required/)).not.toBeInTheDocument();
+  });
+
   it("flags duplicate addresses across representations (uniqueViolations)", () => {
     const config = breadConfig();
     (config.devices as UnknownRecord[]).push({ id: "dcmt0", type: "dcmt", address: 10 });
@@ -185,5 +205,26 @@ describe("SchemaForm.svelte (sim envelope)", () => {
     const tick = screen.getByPlaceholderText("10");
     expect(tick).toHaveValue(null);
     expect(screen.getAllByText("Required").length).toBeGreaterThan(0);
+  });
+
+  it("explains a conditionally required scalar beside it, and only while empty", async () => {
+    const config = reactive({
+      devices: [],
+      simulation: { mode: "non_interacting" },
+    });
+    render(SchemaForm, { props: { schema: simSchema, value: config, onChanged: vi.fn() } });
+
+    const hint = "Required because Simulation mode is 'Local physics (fixed tick)'";
+    const tick = screen.getByPlaceholderText("10");
+    const group = tick.closest(".form-group") as HTMLElement;
+    expect(within(group).getByText(hint)).toBeInTheDocument();
+    // A statically required field needs no explanation.
+    const mode = screen.getByText("Simulation mode").closest(".form-group") as HTMLElement;
+    expect(within(mode).queryByText(/Required because/)).not.toBeInTheDocument();
+
+    await fireEvent.change(tick, { target: { value: "10" } });
+    await waitFor(() => {
+      expect(screen.queryByText(hint)).not.toBeInTheDocument();
+    });
   });
 });
