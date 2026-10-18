@@ -15,18 +15,31 @@
     type RuntimeApiStatus,
     type RuntimeStatus,
   } from "../lib/contracts";
-  import { activeVariant, inertnessViolation, MANUAL_VARIANT } from "../lib/canonical";
+  import {
+    activeVariant,
+    inertnessViolation,
+    launchVariantMismatch,
+    MANUAL_VARIANT,
+    savedLaunch,
+    type SavedLaunch,
+  } from "../lib/canonical";
 
   let {
     projectName,
     system,
     runtimeStatus,
     commissionRunningForCurrent,
+    editingVariant = "",
+    saved = $bindable(null),
   }: {
     projectName: string | null;
     system: ProjectDoc | null;
     runtimeStatus: RuntimeStatus | null;
     commissionRunningForCurrent: boolean;
+    /** The variant open in Compose, for the mismatch banner. */
+    editingVariant?: string;
+    /** The saved project's variants and launch variant; null until known. */
+    saved?: SavedLaunch | null;
   } = $props();
 
   // Imported projects are deploy-only (#226): no dev-launch, no .anpkg export.
@@ -39,8 +52,61 @@
   // below is where a variant is chosen (#275).
   const variants = $derived(Object.keys(system?.profile?.runtime_profiles ?? {}).sort());
 
-  /** The HTTP port dev-launch serves on, from the variant it will run. */
-  const launchPort = $derived(system?.variants?.[activeVariant(system)]?.http?.port ?? null);
+  /** The HTTP port dev-launch serves on, from the saved variant it runs. */
+  const launchPort = $derived(
+    saved ? saved.port : (system?.variants?.[activeVariant(system)]?.http?.port ?? null),
+  );
+
+  // The variant dev-launch runs is chosen here, never by Compose's selector
+  // (#339). Launch reads the SAVED project, so the control resolves and offers
+  // variants from the saved copy, the set the backend's launch_variant uses.
+  // A variant that exists only in unsaved edits is listed but disabled; a
+  // launch.variant naming a missing variant shows what Launch will really run
+  // and is left in the file as it is.
+  const savedVariants = $derived(saved?.variants ?? []);
+  const launchVariants = $derived(
+    Array.from(new Set([...savedVariants, ...Object.keys(system?.variants ?? {})])).sort(),
+  );
+  const launchVariant = $derived(saved?.launch ?? activeVariant(system));
+  const variantMismatch = $derived(launchVariantMismatch(system, editingVariant, launchVariant));
+  let launchVariantSaving = $state<boolean>(false);
+  let launchVariantError = $state<string>("");
+
+  /**
+   * Write launch.variant to the saved project. The PUT carries the saved
+   * document with only that key changed: the in-memory one may hold unsaved
+   * Compose edits, which this must not save on the user's behalf.
+   */
+  async function setLaunchVariant(select: HTMLSelectElement): Promise<void> {
+    const next = select.value;
+    if (!savedVariants.includes(next)) {
+      select.value = launchVariant;
+      return;
+    }
+    if (!projectName || !system || next === launchVariant) return;
+    launchVariantSaving = true;
+    launchVariantError = "";
+    try {
+      const path = `/api/projects/${encodeURIComponent(projectName)}`;
+      const onDisk = await fetchJson<ProjectDoc>(path);
+      onDisk.launch = { ...(onDisk.launch ?? {}), variant: next };
+      await fetchJson(path, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(onDisk),
+      });
+      saved = savedLaunch(onDisk);
+      system.launch = { ...(system.launch ?? {}), variant: next };
+      // Preflight checks the variant dev-launch runs, so its result no longer
+      // speaks for the next launch.
+      preflightResults = null;
+    } catch (err) {
+      select.value = launchVariant;
+      launchVariantError = `Could not set the dev-launch variant: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      launchVariantSaving = false;
+    }
+  }
 
   const running = $derived(Boolean(runtimeStatus?.running));
   const runningProject = $derived(
@@ -671,8 +737,36 @@
     </div>
   {/if}
 
+  {#if variantMismatch && !imported}
+    <div class="workspace-advisory" data-testid="launch-variant-mismatch">{variantMismatch}</div>
+  {/if}
+
   <!-- Launch panel -->
   <div id="launch-panel" class="launch-panel">
+    {#if !imported && system}
+      <div class="form-group">
+        <label for="launch-variant-select">Dev-launch variant</label>
+        <select
+          id="launch-variant-select"
+          disabled={launchVariantSaving || saved === null}
+          onchange={(e: Event) => void setLaunchVariant(e.currentTarget as HTMLSelectElement)}
+        >
+          <!-- Selection is set per option: the list changes once the saved
+               project loads, and a select-level value set before then is lost. -->
+          {#each launchVariants as name (name)}
+            {@const onDisk = savedVariants.includes(name)}
+            <option value={name} disabled={!onDisk} selected={name === launchVariant}
+              >{name}{onDisk ? "" : " (save in Compose to launch this variant)"}</option
+            >
+          {/each}
+        </select>
+        <span class="field-note"
+          >The variant Launch runs, from the saved project. Compose's variant selector only picks
+          what you edit.</span
+        >
+        {#if launchVariantError}<span class="field-error">{launchVariantError}</span>{/if}
+      </div>
+    {/if}
     {#if imported}
       <div class="workspace-advisory">
         Imported machine profile — carried verbatim; dev-launch and preflight are not available.

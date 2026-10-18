@@ -8,6 +8,7 @@
   import Commission from "./routes/Commission.svelte";
   import Operate from "./routes/Operate.svelte";
   import { fetchJson } from "./lib/api";
+  import { savedLaunch, type SavedLaunch } from "./lib/canonical";
   import type {
     ProjectSummary,
     ProviderSchemasResponse,
@@ -35,6 +36,11 @@
   let showOnboarding = $state<boolean>(false);
   let projectName = $state<string | null>(null);
   let system = $state<ProjectDoc | null>(null);
+  // The variant open in Compose. Only Compose's selector sets it; it is never
+  // written to the project, and dev-launch runs launch.variant instead (#339).
+  let editingVariant = $state<string>("");
+  // The project as last read from or written to disk, for what Launch runs.
+  let saved = $state<SavedLaunch | null>(null);
   let workspace = $state<WorkspaceName | null>(null);
   let dirty = $state<boolean>(false);
   let currentPath = $state<string>("/");
@@ -133,7 +139,10 @@
     }
 
     const projectChanged = route.project !== projectName;
-    if (projectChanged) dirty = false;
+    if (projectChanged) {
+      dirty = false;
+      editingVariant = "";
+    }
 
     if (projectChanged && route.project) {
       const loaded = await loadProject(route.project);
@@ -169,7 +178,9 @@
 
   async function loadProject(name: string): Promise<boolean> {
     try {
-      system = await fetchJson<ProjectDoc>(`/api/projects/${encodeURIComponent(name)}`);
+      const doc = await fetchJson<ProjectDoc>(`/api/projects/${encodeURIComponent(name)}`);
+      saved = savedLaunch(doc);
+      system = doc;
       projectName = name;
       return true;
     } catch {
@@ -368,21 +379,30 @@
       {system}
       {providerSchemas}
       {runtimeStatus}
+      bind:editingVariant
       onDirty={() => {
         dirty = true;
       }}
       onSaved={() => {
         dirty = false;
+        saved = savedLaunch(system);
       }}
     />
   {:else if workspace === "commission"}
     <!-- Remount per project: a preflight result, or one still in flight,
          belongs to the project it ran for and must not gate another's Launch. -->
     {#key projectName}
-      <Commission {projectName} {system} {runtimeStatus} {commissionRunningForCurrent} />
+      <Commission
+        {projectName}
+        {system}
+        {runtimeStatus}
+        {commissionRunningForCurrent}
+        {editingVariant}
+        bind:saved
+      />
     {/key}
   {:else if workspace === "operate"}
-    <Operate {projectName} {system} {runtimeStatus} />
+    <Operate {projectName} {system} {runtimeStatus} {editingVariant} {saved} />
   {/if}
 </main>
 

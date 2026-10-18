@@ -6,6 +6,7 @@ import {
   inertnessViolation,
   machineIdFromName,
   pinnedKinds,
+  launchVariantMismatch,
   providerCommandToken,
   providerConfigFilename,
   projectPathToken,
@@ -146,5 +147,40 @@ describe("quoted false-ish spellings", () => {
         `should be inert: ${JSON.stringify(enabled)}`,
       ).toBeNull();
     }
+  });
+});
+
+describe("the dev-launch variant (#339)", () => {
+  // Key order puts automation first, so "the first variant" and "manual"
+  // differ here.
+  const doc = {
+    format: "machine-profile",
+    authored: true,
+    profile: { machine_id: "rig", runtime_profiles: {}, providers: {} },
+    variants: { automation: {}, manual: {} },
+    providers: {},
+  } as unknown as ProjectDocument;
+
+  it("is manual when launch.variant is unset, whatever the key order", () => {
+    expect(Object.keys(doc.variants)[0]).toBe("automation");
+    expect(activeVariant(doc)).toBe("manual");
+    expect(activeVariant({ ...doc, launch: {} })).toBe("manual");
+  });
+
+  it("names the mismatch between the edited and the launched variant", () => {
+    expect(launchVariantMismatch(doc, "automation")).toBe("Editing automation; Launch runs manual");
+    expect(launchVariantMismatch({ ...doc, launch: { variant: "automation" } }, "manual")).toBe(
+      "Editing manual; Launch runs automation",
+    );
+  });
+
+  it("is silent when they agree, when nothing was picked, or for an unknown variant", () => {
+    expect(launchVariantMismatch(doc, "manual")).toBeNull();
+    expect(
+      launchVariantMismatch({ ...doc, launch: { variant: "automation" } }, "automation"),
+    ).toBeNull();
+    expect(launchVariantMismatch(doc, "")).toBeNull();
+    expect(launchVariantMismatch(doc, "gone")).toBeNull();
+    expect(launchVariantMismatch(null, "automation")).toBeNull();
   });
 });

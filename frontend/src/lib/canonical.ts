@@ -72,13 +72,56 @@ export function machineIdFromName(name: string): string {
   return cleaned || "machine";
 }
 
-/** Which variant the composer is editing / dev-launch runs. */
+/**
+ * Which variant dev-launch runs: `launch.variant`, else `manual` (or, in a
+ * project without a `manual` variant, its first one). Only the
+ * Commission control writes `launch.variant`; Compose's variant selector picks
+ * what is being edited and never changes it (#339). An unset value is read as
+ * `manual`, not written, so opening an old project changes no saved file.
+ */
 export function activeVariant(doc: ProjectDocument | null): string {
   const requested = typeof doc?.launch?.variant === "string" ? doc.launch.variant : "";
   if (requested && doc?.variants?.[requested]) return requested;
   if (doc?.variants?.[MANUAL_VARIANT]) return MANUAL_VARIANT;
   const names = Object.keys(doc?.variants ?? {});
   return names[0] ?? MANUAL_VARIANT;
+}
+
+/**
+ * "Editing automation; Launch runs manual" when the variant open in Compose is
+ * not the one dev-launch runs, else null. An empty or unknown `editing` means
+ * nothing was picked, so Compose is showing the launch variant itself.
+ * `launch` defaults to `doc`'s own; pass the saved project's when it differs.
+ */
+export function launchVariantMismatch(
+  doc: ProjectDocument | null,
+  editing: string,
+  launch: string = activeVariant(doc),
+): string | null {
+  if (!editing || !doc?.variants?.[editing]) return null;
+  return editing === launch ? null : `Editing ${editing}; Launch runs ${launch}`;
+}
+
+/**
+ * What dev-launch resolves against: the SAVED project's variants and the
+ * variant Launch will run from it. The shell keeps one copy so Commission and
+ * Operate agree, refreshed on load, on every Compose save and after the
+ * Commission control writes launch.variant (#339).
+ */
+export interface SavedLaunch {
+  variants: string[];
+  launch: string;
+  /** The HTTP port the launch variant serves on, or null. */
+  port: number | null;
+}
+
+export function savedLaunch(doc: ProjectDocument | null): SavedLaunch {
+  const launch = activeVariant(doc);
+  return {
+    variants: Object.keys(doc?.variants ?? {}),
+    launch,
+    port: doc?.variants?.[launch]?.http?.port ?? null,
+  };
 }
 
 export function activeRuntimeConfig(doc: ProjectDocument | null): RuntimeConfigDoc | null {

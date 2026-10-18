@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import Commission from '../../src/routes/Commission.svelte';
@@ -646,9 +646,10 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
 
   it('marks a variant that does not boot inert, and says unsaved edits are not deployed', () => {
     setup();
-    expect(screen.getByRole('option', { name: 'manual' })).toBeInTheDocument();
+    const deployVariant = screen.getByRole('combobox', { name: 'Runtime variant' });
+    expect(within(deployVariant).getByRole('option', { name: 'manual' })).toBeInTheDocument();
     expect(
-      screen.getByRole('option', { name: 'automation (fresh install refuses this)' }),
+      within(deployVariant).getByRole('option', { name: 'automation (fresh install refuses this)' }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Deploys the saved project; unsaved edits are not included/)).toBeInTheDocument();
   });
