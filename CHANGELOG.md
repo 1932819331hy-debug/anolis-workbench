@@ -13,6 +13,24 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-19
+
+### Fixed
+
+- `anolis-provision install` and `anolis-provision remote` list the
+  configs `install.sh` found on the target and kept, under "Kept on the
+  target (install.sh):", in the summary (#521, closes
+  anolishq/anolis#439). When one of those lines is a warning, such as
+  anolis 0.1.49's warning that a kept `runtime.yaml` points a provider at
+  another project's config, a `WARNING:` line on stderr points at them.
+
+### Changed
+
+- Vendored contracts synced to anolis 0.1.48 (#518). The runtime-http
+  description now says loopback clients need the API token unless
+  `http.auth_exempt_loopback` is true. The sim-quickstart template pins
+  runtime 0.1.48.
+
 ## [0.18.0] - 2026-10-18
 
 ### Upgrade notes
