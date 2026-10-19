@@ -255,6 +255,86 @@ class TestObservabilityFlag:
         assert "    ⚠ health: provider io1: UNAVAILABLE\n" in out
         assert "WARNING" in err and "health" in err
 
+    # install.sh's phase_config_runtime output for an upgrade under a new
+    # project name that keeps a runtime.yaml naming the old project's provider
+    # configs (anolishq/anolis#439), with its temporary prefix put back to
+    # /opt/anolis.
+    _KEPT_OTHER_PROJECT = (_FIXTURES / "kept-other-project.txt").read_text(encoding="utf-8")
+    _BREAD_KEPT = (
+        "    ⚠ config (runtime): provider 'bread0' still reads "
+        "/opt/anolis/projects/bioreactor-v1/config/provider-bread.bioreactor.yaml from project 'bioreactor-v1', "
+        "not /opt/anolis/projects/bioreactor-v1-060/config/provider-bread.bioreactor.yaml; "
+        "/opt/anolis/config/runtime.yaml is preserved, edit it to switch.\n"
+    )
+
+    def _kept_result(self, output: str):
+        from anolis_workbench.core import deploy
+
+        preserved = deploy.preserved_lines(output)
+        return deploy.DeployResult(
+            project_name="p",
+            runtime_version="0.1.48",
+            prefix="/opt/anolis",
+            output=output,
+            preserved=preserved,
+            runtime_config_kept=deploy.runtime_config_kept(preserved),
+        )
+
+    def test_install_shows_what_install_sh_kept(self, tmp_path, monkeypatch, capsys) -> None:
+        from anolis_workbench.cli import provision_cli
+
+        result = self._kept_result(self._KEPT_OTHER_PROJECT)
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "deploy_local", lambda **kwargs: result)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "install"])
+        assert provision_cli._run_install(provision_cli._parse_args()) == 0
+        out, err = capsys.readouterr()
+        assert "  Kept on the target (install.sh):\n" in out
+        assert "    → config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)\n" in out
+        assert self._BREAD_KEPT in out
+        assert "    ⚠ config (runtime): provider 'ezo0' still reads " in out
+        assert "WARNING" in err and "config" in err
+
+    def test_remote_shows_what_install_sh_kept(self, tmp_path, monkeypatch, capsys) -> None:
+        from anolis_workbench.cli import provision_cli
+        from anolis_workbench.core import executor as executor_module
+
+        class _FakeSSH:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def run(self, cmd: list[str], **kwargs: object) -> executor_module.RunResult:
+                return executor_module.RunResult(returncode=0, stdout="x86_64\n", stderr="")
+
+        result = self._kept_result(self._KEPT_OTHER_PROJECT)
+        monkeypatch.setattr(executor_module, "SubprocessSSHExecutor", _FakeSSH)
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "deploy_remote", lambda **kwargs: result)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "remote", "--target", "pi@host"])
+        assert provision_cli._run_remote(provision_cli._parse_args()) == 0
+        out, err = capsys.readouterr()
+        assert "  Kept on the target (install.sh):\n" in out
+        assert self._BREAD_KEPT in out
+        assert "WARNING" in err and "config" in err
+
+    def test_install_kept_lines_without_a_warning_are_shown_quietly(self, tmp_path, monkeypatch, capsys) -> None:
+        from anolis_workbench.cli import provision_cli
+
+        result = self._kept_result(self._KEPT_OTHER_PROJECT.splitlines(keepends=True)[0])
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "deploy_local", lambda **kwargs: result)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "install"])
+        assert provision_cli._run_install(provision_cli._parse_args()) == 0
+        out, err = capsys.readouterr()
+        assert "    → config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)\n" in out
+        assert err == ""
+
+    def test_install_with_nothing_kept_shows_no_kept_section(self, tmp_path, monkeypatch, capsys) -> None:
+        output = (self._FIXTURES / "health-all-running.txt").read_text(encoding="utf-8")
+        assert self._run_install_with_output(tmp_path, monkeypatch, output) == 0
+        out, _ = capsys.readouterr()
+        assert "Kept on the target" not in out
+
     def test_install_shows_a_tail_when_install_sh_printed_no_observability_lines(
         self, tmp_path, monkeypatch, capsys
     ) -> None:

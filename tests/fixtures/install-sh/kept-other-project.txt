@@ -1,0 +1,3 @@
+[0;33m→ config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)[0m
+[0;33m⚠ config (runtime): provider 'bread0' still reads /opt/anolis/projects/bioreactor-v1/config/provider-bread.bioreactor.yaml from project 'bioreactor-v1', not /opt/anolis/projects/bioreactor-v1-060/config/provider-bread.bioreactor.yaml; /opt/anolis/config/runtime.yaml is preserved, edit it to switch.[0m
+[0;33m⚠ config (runtime): provider 'ezo0' still reads /opt/anolis/projects/bioreactor-v1/config/provider-ezo.bioreactor.yaml from project 'bioreactor-v1', not /opt/anolis/projects/bioreactor-v1-060/config/provider-ezo.bioreactor.yaml; /opt/anolis/config/runtime.yaml is preserved, edit it to switch.[0m

@@ -405,6 +405,24 @@ def _print_host_followups(result: deploy.DeployResult) -> None:
         )
 
 
+def _print_preserved(result: deploy.DeployResult) -> None:
+    """install.sh's lines for configs it found on the target and left in
+    place. A kept runtime.yaml is not replaced by this project's, and can still
+    start the providers on another project's configs (anolishq/anolis#439), so
+    without this the summary hides what the runtime will actually run."""
+    if not result.preserved:
+        return
+    print()
+    print("  Kept on the target (install.sh):")
+    for line in result.preserved:
+        print(f"    {line}")
+    if any(line.startswith("⚠") for line in result.preserved):
+        print(
+            "\nWARNING: config: install.sh kept a config this project does not replace — see the lines above",
+            file=sys.stderr,
+        )
+
+
 def _print_health(result: deploy.DeployResult) -> None:
     """install.sh's health lines. A provider that is not running is a
     warning and install.sh still exits 0, so without this the summary hides
@@ -516,6 +534,7 @@ def _run_install(args: argparse.Namespace) -> int:
         print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
         print(f"  ✓ Project: {project_dir}")
         _print_host_followups(result)
+        _print_preserved(result)
         _print_health(result)
         if _wants_observability(args):
             _print_observability(result)
@@ -685,6 +704,7 @@ def _run_remote(args: argparse.Namespace) -> int:
     print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
     print(f"  ✓ Project: {project_dir}")
     _print_host_followups(result)
+    _print_preserved(result)
     _print_health(result)
     if _wants_observability(args):
         _print_observability(
