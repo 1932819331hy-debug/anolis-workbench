@@ -18,7 +18,7 @@ concurrency:
 jobs:
   changes:
     name: Detect code changes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       pull-requests: read
     outputs:
@@ -41,7 +41,7 @@ jobs:
     name: Frontend (Node / Vite build)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
@@ -93,7 +93,7 @@ jobs:
     name: Lint (ruff)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
@@ -122,7 +122,7 @@ jobs:
     name: Type check (mypy)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
@@ -149,7 +149,7 @@ jobs:
     name: Unit tests
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     steps:
@@ -204,7 +204,7 @@ jobs:
     name: Contract drift check
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
 
     steps:
@@ -234,7 +234,7 @@ jobs:
     name: Freeze smoke test (Linux)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     steps:
@@ -298,7 +298,7 @@ jobs:
     name: Desktop (Rust / Tauri)
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
 
     steps:
@@ -353,7 +353,7 @@ jobs:
     name: ok
     if: always()
     needs: [changes, frontend, lint, typecheck, test, contract-drift, freeze-smoke, version-sync, desktop]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Fail if any upstream job failed or was cancelled
