@@ -13,6 +13,41 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-10-21
+
+### Upgrade notes
+
+- **An existing install keeps the certifi it was installed with.** Run
+  `pip install --upgrade pip certifi` in the environment the workbench is
+  installed in. That's `~/.local/share/anolis-workbench/venv/bin/pip` for an
+  install made by anolis-projects' `install-workbench-pi.sh`. For a pipx
+  install: `pipx runpip anolis-workbench install --upgrade pip certifi`. A
+  fresh `pip install anolis-workbench` already resolves certifi 2026.10.19 or
+  later. Desktop installers need this release.
+- **Debian's own trust store needs its update too.** System Python and
+  Debian's `python3-certifi` read `/etc/ssl/certs`, which `ca-certificates`
+  20250419+deb13u1 (DSA-6572-1) fixes on Debian 13:
+  `sudo apt update && sudo apt install --only-upgrade ca-certificates`.
+
+### Security
+
+- certifi 2026.10.19 in `uv.lock` (#531), so the frozen server sidecar and
+  the desktop bundles carry it. certifi before 2026.10.19 bundles emSign
+  root CAs whose intermediate CA keys are compromised (the eMudhra
+  incident). requests uses that bundle for every HTTPS call the workbench
+  makes, release downloads included. pip before 26.2.2 also vendors it,
+  hence the pip upgrade above.
+
+### Changed
+
+- Vendored anolis contracts synced to anolis 0.1.49, and the sim-quickstart
+  template pins runtime 0.1.49 (#524). The schemas are unchanged; the locks
+  record 0.1.49's release asset digests.
+- Vendored bread config-schema envelope synced to anolis-provider-bread
+  0.8.0 (#475); the schema is unchanged, only `provider_version` moves.
+- The desktop wrapper builds against tauri 2.12.5 and tauri-build 2.7.4
+  (#529).
+
 ## [0.18.1] - 2026-10-19
 
 ### Fixed
