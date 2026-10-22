@@ -172,15 +172,23 @@
     updateFeedback = "";
     updateIsError = false;
     try {
-      const res = await fetchJson<{ success: boolean; version?: string; error?: string }>(
-        "/api/update",
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
-      );
+      const res = await fetchJson<{
+        success: boolean;
+        version?: string;
+        error?: string;
+        warning?: string | null;
+      }>("/api/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
       if (res.success) {
         updateFeedback = `Updated to v${res.version ?? "latest"}. Restart workbench to apply.`;
+        if (res.warning) updateFeedback += ` ${res.warning}`;
         updateInfo = null;
       } else {
         updateFeedback = `Update failed: ${res.error ?? "unknown error"}`;
+        if (res.warning) updateFeedback += ` ${res.warning}`;
         updateIsError = true;
       }
     } catch (err) {
@@ -201,6 +209,7 @@
         success: boolean;
         output: string;
         error: string | null;
+        warning?: string | null;
       }>("/api/rollback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -208,6 +217,7 @@
       });
       if (res.success) {
         rollbackFeedback = "Rolled back to previous binaries (service restarted)";
+        if (res.warning) rollbackFeedback += `. ${res.warning}`;
       } else {
         rollbackFeedback = res.error ?? "Nothing to rollback";
         rollbackIsError = true;

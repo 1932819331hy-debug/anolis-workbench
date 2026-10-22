@@ -16,6 +16,7 @@ from typing import Optional
 import requests
 
 from anolis_workbench.core.child_env import child_env
+from anolis_workbench.core.release_verify import ReleaseVerificationError, verify_install_sh
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,8 @@ class UpdateResult:
     success: bool
     version: Optional[str] = None
     error: Optional[str] = None
+    # Set when install.sh ran without a SHA256SUMS line to check it against.
+    warning: Optional[str] = None
 
 
 def _detect_arch() -> str:
@@ -105,17 +108,23 @@ def _detect_arch() -> str:
     return "x86_64"
 
 
-def download_install_script(version: str) -> Path:
-    """Download install.sh from the given release version to a temp file."""
+def download_install_script(version: str) -> tuple[Path, Optional[str]]:
+    """Download install.sh from the given release version to a temp file and check it.
+
+    Returns the script's path and, when the release's SHA256SUMS has no line
+    for it, the warning to show. Raises ReleaseVerificationError when it does
+    not match, or SHA256SUMS cannot be fetched.
+    """
     url = f"https://github.com/{GITHUB_REPO}/releases/download/v{version}/install.sh"
     resp = requests.get(url, timeout=60, allow_redirects=True)
     resp.raise_for_status()
+    warning = verify_install_sh(GITHUB_REPO, version, resp.content)
 
     tmp = tempfile.NamedTemporaryFile(prefix="anolis-install-", suffix=".sh", delete=False)
     tmp.write(resp.content)
     tmp.close()
     os.chmod(tmp.name, os.stat(tmp.name).st_mode | stat.S_IXUSR | stat.S_IXGRP)
-    return Path(tmp.name)
+    return Path(tmp.name), warning
 
 
 def perform_update(
@@ -141,9 +150,11 @@ def perform_update(
         )
 
     try:
-        script = download_install_script(target_version)
+        script, warning = download_install_script(target_version)
     except requests.RequestException as exc:
         return UpdateResult(success=False, error=f"Failed to download install script: {exc}")
+    except ReleaseVerificationError as exc:
+        return UpdateResult(success=False, error=f"Install script not verified: {exc}")
 
     cmd = ["sudo", str(script)]
     if install_prefix:
@@ -159,14 +170,15 @@ def perform_update(
             env=child_env(),
         )
         logger.info("Update output: %s", result.stdout)
-        return UpdateResult(success=True, version=target_version)
+        return UpdateResult(success=True, version=target_version, warning=warning)
     except subprocess.CalledProcessError as exc:
         return UpdateResult(
             success=False,
             error=f"Install script failed (exit {exc.returncode}): {exc.stderr[:500]}",
+            warning=warning,
         )
     except subprocess.TimeoutExpired:
-        return UpdateResult(success=False, error="Install script timed out (5 min)")
+        return UpdateResult(success=False, error="Install script timed out (5 min)", warning=warning)
     finally:
         try:
             script.unlink()

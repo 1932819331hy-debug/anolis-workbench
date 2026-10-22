@@ -22,6 +22,8 @@ class RollbackResult:
     success: bool
     output: str = ""
     error: str | None = None
+    # Set when install.sh ran without a SHA256SUMS line to check it against.
+    warning: str | None = None
 
 
 def rollback(
@@ -38,8 +40,14 @@ def rollback(
     Returns:
         RollbackResult; failure details (e.g. no .prev backup) in .error.
     """
+    warnings: list[str] = []
+
+    def _progress(step: str, detail: str = "") -> None:
+        if step == "unverified":
+            warnings.append(detail)
+
     try:
-        output = deploy.run_rollback(executor, prefix=prefix)
+        output = deploy.run_rollback(executor, prefix=prefix, progress_callback=_progress)
     except deploy.DeployError as exc:
         return RollbackResult(success=False, error=str(exc))
-    return RollbackResult(success=True, output=output)
+    return RollbackResult(success=True, output=output, warning=warnings[0] if warnings else None)

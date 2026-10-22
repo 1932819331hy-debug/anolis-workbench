@@ -360,6 +360,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "success": result.success,
                 "version": result.version,
                 "error": result.error,
+                "warning": result.warning,
             },
         )
 
@@ -374,6 +375,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "success": result.success,
                 "output": result.output,
                 "error": result.error,
+                "warning": result.warning,
             },
         )
 

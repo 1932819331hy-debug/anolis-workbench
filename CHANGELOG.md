@@ -13,6 +13,17 @@ Historical note:
 
 ## [Unreleased]
 
+### Security
+
+- `anolis-provision` and the workbench check a downloaded `install.sh`
+  against the `SHA256SUMS` of its release before running it, for install,
+  remote, bundle, rollback and self-update (#530). A mismatch stops the run,
+  and so does a `SHA256SUMS` that cannot be fetched for any reason but a
+  404. A release that has no `SHA256SUMS`, or no line for `install.sh`,
+  still runs, with `WARNING: install.sh not verified: anolis v<x> predates
+  install.sh in SHA256SUMS` in the CLI and in the UI. That covers every
+  anolis release through v0.1.49; #533 turns the warning into a refusal.
+
 ## [0.18.2] - 2026-10-21
 
 ### Upgrade notes

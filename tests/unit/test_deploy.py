@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import pathlib
 from typing import Callable
 
@@ -168,17 +169,77 @@ class _FakeResponse:
         self.content = content
 
 
-def test_fetch_install_sh_downloads_pinned_release(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+_RELEASE = "https://github.com/anolishq/anolis/releases/download/v0.1.27"
+_SCRIPT = b"#!/usr/bin/env bash\n"
+_UNVERIFIED = "WARNING: install.sh not verified: anolis v0.1.27 predates install.sh in SHA256SUMS"
+
+
+def _serve_release(monkeypatch: pytest.MonkeyPatch, sums: _FakeResponse | Exception) -> list[str]:
+    """install.sh at v0.1.27, and ``sums`` for its SHA256SUMS."""
     urls: list[str] = []
 
     def _get(url, **kwargs):
         urls.append(url)
-        return _FakeResponse(200, b"#!/usr/bin/env bash\n")
+        if url == f"{_RELEASE}/install.sh":
+            return _FakeResponse(200, _SCRIPT)
+        assert url == f"{_RELEASE}/SHA256SUMS"
+        if isinstance(sums, Exception):
+            raise sums
+        return sums
 
     monkeypatch.setattr(deploy.requests, "get", _get)
-    path = deploy.fetch_install_sh("0.1.27", tmp_path)
-    assert path.read_bytes().startswith(b"#!")
-    assert urls == ["https://github.com/anolishq/anolis/releases/download/v0.1.27/install.sh"]
+    return urls
+
+
+def _sums(digest: str) -> _FakeResponse:
+    return _FakeResponse(200, f"{'0' * 64}  anolis-0.1.27-linux-arm64.tar.gz\n{digest}  install.sh\n".encode())
+
+
+def test_fetch_install_sh_downloads_pinned_release(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    urls = _serve_release(monkeypatch, _sums(hashlib.sha256(_SCRIPT).hexdigest()))
+    path, warning = deploy.fetch_install_sh("0.1.27", tmp_path)
+    assert path.read_bytes() == _SCRIPT
+    assert warning is None
+    assert urls == [f"{_RELEASE}/install.sh", f"{_RELEASE}/SHA256SUMS"]
+
+
+def test_fetch_install_sh_refuses_a_mismatch(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _serve_release(monkeypatch, _sums(hashlib.sha256(b"something else").hexdigest()))
+    with pytest.raises(deploy.DeployError, match="does not match its SHA256SUMS"):
+        deploy.fetch_install_sh("0.1.27", tmp_path)
+    assert not (tmp_path / "install.sh").exists()
+
+
+@pytest.mark.parametrize(
+    "sums",
+    [
+        pytest.param(_FakeResponse(200, f"{'0' * 64}  anolis-0.1.27-linux-arm64.tar.gz\n".encode()), id="no-line"),
+        pytest.param(_FakeResponse(404), id="404"),
+    ],
+)
+def test_fetch_install_sh_warns_when_the_release_cannot_check_it(
+    sums: _FakeResponse, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve_release(monkeypatch, sums)
+    path, warning = deploy.fetch_install_sh("0.1.27", tmp_path)
+    assert path.read_bytes() == _SCRIPT
+    assert warning == _UNVERIFIED
+
+
+@pytest.mark.parametrize(
+    "sums, reason",
+    [
+        pytest.param(requests.ConnectionError("connection reset"), "connection reset", id="fetch-error"),
+        pytest.param(_FakeResponse(500), "HTTP 500", id="http-500"),
+    ],
+)
+def test_fetch_install_sh_refuses_when_sha256sums_cannot_be_fetched(
+    sums: _FakeResponse | Exception, reason: str, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve_release(monkeypatch, sums)
+    with pytest.raises(deploy.DeployError, match=f"could not fetch SHA256SUMS.*{reason}.*refusing"):
+        deploy.fetch_install_sh("0.1.27", tmp_path)
+    assert not (tmp_path / "install.sh").exists()
 
 
 def test_fetch_install_sh_raises_on_http_error(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -192,11 +253,11 @@ def test_fetch_install_sh_raises_on_http_error(tmp_path: pathlib.Path, monkeypat
 # ---------------------------------------------------------------------------
 
 
-def _stub_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _fake_fetch(version: str, dest: pathlib.Path) -> pathlib.Path:
+def _stub_fetch(monkeypatch: pytest.MonkeyPatch, warning: str | None = None) -> None:
+    def _fake_fetch(version: str, dest: pathlib.Path) -> tuple[pathlib.Path, str | None]:
         path = dest / "install.sh"
         path.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
-        return path
+        return path, warning
 
     monkeypatch.setattr(deploy, "fetch_install_sh", _fake_fetch)
 
@@ -222,6 +283,31 @@ def test_deploy_local_runs_install_sh_project(project_dir: pathlib.Path, monkeyp
     assert cmd[3].endswith("/deploy-fixture")
     assert "--no-start" in cmd
     assert "--prefix" not in cmd  # default prefix omitted
+
+
+@pytest.mark.parametrize("remote", [False, True], ids=["local", "remote"])
+def test_deploy_reports_an_unverified_install_sh(
+    remote: bool, project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_fetch(monkeypatch, warning=_UNVERIFIED)
+    events: list[tuple[str, str]] = []
+    deploy_fn = deploy.deploy_remote if remote else deploy.deploy_local
+    result = deploy_fn(
+        project_dir=project_dir,
+        project_name="deploy-fixture",
+        executor=RecordingExecutor(),
+        progress_callback=lambda step, detail: events.append((step, detail)),
+    )
+    assert result.install_sh_warning == _UNVERIFIED
+    assert ("unverified", _UNVERIFIED) in events
+
+
+def test_deploy_local_has_no_warning_for_a_verified_install_sh(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_fetch(monkeypatch)
+    result = deploy.deploy_local(project_dir=project_dir, project_name="deploy-fixture", executor=RecordingExecutor())
+    assert result.install_sh_warning is None
 
 
 def test_deploy_local_passes_custom_prefix(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -415,6 +501,13 @@ def test_run_rollback_raises_on_failure(monkeypatch: pytest.MonkeyPatch) -> None
         deploy.run_rollback(executor)
 
 
+def test_run_rollback_reports_an_unverified_install_sh(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_fetch(monkeypatch, warning=_UNVERIFIED)
+    events: list[tuple[str, str]] = []
+    deploy.run_rollback(RecordingExecutor(), progress_callback=lambda step, detail: events.append((step, detail)))
+    assert events == [("unverified", _UNVERIFIED)]
+
+
 def test_run_rollback_raises_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(releases, "_RELEASE_CACHE", {"anolishq/anolis": None})
     with pytest.raises(deploy.DeployError, match="latest anolis release"):
@@ -451,6 +544,29 @@ def test_stage_bundle_invokes_stage_and_returns_tarball(
     assert cmd[0] == "bash"
     assert "--stage" in cmd and "--project" in cmd
     assert cmd[cmd.index("--arch") + 1] == "arm64"
+
+
+def test_stage_bundle_reports_an_unverified_install_sh(
+    project_dir: pathlib.Path, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_fetch(monkeypatch, warning=_UNVERIFIED)
+    out_dir = tmp_path / "bundles"
+
+    class _StagingExecutor(RecordingExecutor):
+        def run(self, cmd, *, input=None, sudo=False, timeout=None):
+            (out_dir / "anolis-deploy-fixture-0.1.27-arm64.tar.gz").write_bytes(b"tar")
+            return RunResult(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(deploy, "LocalExecutor", _StagingExecutor)
+    events: list[tuple[str, str]] = []
+    deploy.stage_bundle(
+        project_dir=project_dir,
+        project_name="deploy-fixture",
+        out_dir=out_dir,
+        arch="arm64",
+        progress_callback=lambda step, detail: events.append((step, detail)),
+    )
+    assert ("unverified", _UNVERIFIED) in events
 
 
 def test_stage_bundle_raises_when_no_tarball(

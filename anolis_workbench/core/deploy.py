@@ -28,6 +28,7 @@ import yaml
 from anolis_workbench.core import canonical, machine_profile, releases
 from anolis_workbench.core.executor import Executor, LocalExecutor
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
+from anolis_workbench.core.release_verify import ReleaseVerificationError, verify_install_sh
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,8 @@ class DeployResult:
     # stripped; runtime_config_kept says whether runtime.yaml is among them.
     preserved: list[str] = field(default_factory=list)
     runtime_config_kept: bool = False
+    # Set when install.sh ran without a SHA256SUMS line to check it against.
+    install_sh_warning: str | None = None
 
 
 def materialize_project_dir(
@@ -295,8 +298,13 @@ def _assert_no_crlf(project_dir: pathlib.Path, profile: dict) -> None:
         )
 
 
-def fetch_install_sh(runtime_version: str, dest: pathlib.Path) -> pathlib.Path:
-    """Download install.sh from the anolis release the profile pins."""
+def fetch_install_sh(runtime_version: str, dest: pathlib.Path) -> tuple[pathlib.Path, str | None]:
+    """Download install.sh from the anolis release the profile pins and check it.
+
+    Returns the script's path and, when the release's SHA256SUMS has no
+    line for it, the warning to show. Raises DeployError when it does not
+    match, or SHA256SUMS cannot be fetched.
+    """
     url = f"https://github.com/{releases.RUNTIME_REPO}/releases/download/v{runtime_version}/install.sh"
     try:
         resp = requests.get(url, timeout=30)
@@ -304,10 +312,14 @@ def fetch_install_sh(runtime_version: str, dest: pathlib.Path) -> pathlib.Path:
         raise DeployError(f"failed to download install.sh from {url}: {exc}") from exc
     if resp.status_code != 200:
         raise DeployError(f"failed to download install.sh from {url}: HTTP {resp.status_code}")
+    try:
+        warning = verify_install_sh(releases.RUNTIME_REPO, runtime_version, resp.content)
+    except ReleaseVerificationError as exc:
+        raise DeployError(str(exc)) from exc
     path = dest / "install.sh"
     path.write_bytes(resp.content)
     path.chmod(0o755)
-    return path
+    return path, warning
 
 
 def run_rollback(
@@ -315,6 +327,7 @@ def run_rollback(
     *,
     prefix: pathlib.Path = DEFAULT_INSTALL_PREFIX,
     staging: str = "/tmp/anolis-deploy",
+    progress_callback: ProgressCallback | None = None,
 ) -> str:
     """Restore the previous binaries via `install.sh --rollback` on the target.
 
@@ -330,7 +343,9 @@ def run_rollback(
         raise DeployError("could not resolve the latest anolis release (offline?)")
 
     with tempfile.TemporaryDirectory(prefix="anolis-rollback-") as td:
-        install_sh = fetch_install_sh(version, pathlib.Path(td))
+        install_sh, warning = fetch_install_sh(version, pathlib.Path(td))
+        if warning and progress_callback:
+            progress_callback("unverified", warning)
         target_path = f"{staging}/install.sh"
         executor.mkdir(staging)
         executor.write_file(target_path, install_sh.read_bytes())
@@ -598,7 +613,9 @@ def deploy_local(
         _progress("materialize", "Copying machine-profile project for install.sh")
         mat = materialize_project_dir(project_dir, tmp, variant=variant)
         _progress("fetch", f"Fetching install.sh v{mat.runtime_version}")
-        install_sh = fetch_install_sh(mat.runtime_version, tmp)
+        install_sh, warning = fetch_install_sh(mat.runtime_version, tmp)
+        if warning:
+            _progress("unverified", warning)
         if notice := _existing_config_notice(executor, prefix, variant):
             _progress("existing-config", notice)
         _progress("install", f"Running install.sh --project (runtime v{mat.runtime_version})")
@@ -627,6 +644,7 @@ def deploy_local(
         reboot_pending=reboot,
         preserved=preserved,
         runtime_config_kept=runtime_config_kept(preserved),
+        install_sh_warning=warning,
     )
 
 
@@ -655,7 +673,9 @@ def deploy_remote(
         tmp = pathlib.Path(td)
         _progress("materialize", "Copying machine-profile project for install.sh")
         mat = materialize_project_dir(project_dir, tmp, variant=variant)
-        install_sh = fetch_install_sh(mat.runtime_version, tmp)
+        install_sh, warning = fetch_install_sh(mat.runtime_version, tmp)
+        if warning:
+            _progress("unverified", warning)
 
         remote_root = f"{remote_staging}/{mat.project_dir.name}"
         _progress("push", f"Pushing project config to {remote_root}")
@@ -691,6 +711,7 @@ def deploy_remote(
         reboot_pending=reboot,
         preserved=preserved,
         runtime_config_kept=runtime_config_kept(preserved),
+        install_sh_warning=warning,
     )
 
 
@@ -717,7 +738,9 @@ def stage_bundle(
         tmp = pathlib.Path(td)
         _progress("materialize", "Copying machine-profile project for install.sh --stage")
         mat = materialize_project_dir(project_dir, tmp, variant=variant)
-        install_sh = fetch_install_sh(mat.runtime_version, tmp)
+        install_sh, warning = fetch_install_sh(mat.runtime_version, tmp)
+        if warning:
+            _progress("unverified", warning)
         cmd = ["bash", str(install_sh), "--stage", str(out_dir), "--project", str(mat.project_dir)]
         if pathlib.Path(prefix) != DEFAULT_INSTALL_PREFIX:
             cmd += ["--prefix", str(prefix)]

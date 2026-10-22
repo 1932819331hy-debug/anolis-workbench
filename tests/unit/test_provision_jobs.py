@@ -10,6 +10,8 @@ import pytest
 from anolis_workbench.core import deploy
 from anolis_workbench.server.routes import provision
 
+_UNVERIFIED = "WARNING: install.sh not verified: anolis v0.1.43 predates install.sh in SHA256SUMS"
+
 
 @pytest.fixture()
 def calls(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path) -> list[dict[str, Any]]:
@@ -30,6 +32,7 @@ def test_done_event_carries_the_preflight_and_reboot(calls, monkeypatch: pytest.
             reboot_pending=True,
             preserved=["→ config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)"],
             runtime_config_kept=True,
+            install_sh_warning=_UNVERIFIED,
         )
 
     monkeypatch.setattr(deploy, "deploy_local", _deploy)
@@ -44,6 +47,7 @@ def test_done_event_carries_the_preflight_and_reboot(calls, monkeypatch: pytest.
     assert summary["reboot_pending"] is True
     assert summary["preserved"] == ["→ config (runtime): /opt/anolis/config/runtime.yaml exists (preserved)"]
     assert summary["runtime_config_kept"] is True
+    assert summary["install_sh_warning"] == _UNVERIFIED
 
 
 def test_remote_done_event_says_how_to_reach_grafana(calls, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -288,3 +292,28 @@ def test_observability_needs_a_literal_true(calls, monkeypatch: pytest.MonkeyPat
     for value in (True, None, "true", 1):
         provision._run_install_job(provision.ProvisionJob(job_id="j"), {"with_observability": value})
     assert [c["with_observability"] for c in calls] == [True, False, False, False]
+
+
+@pytest.mark.parametrize(
+    "warnings, detail",
+    [
+        pytest.param([], "Bundle ready: anolis-rig.tar.gz", id="verified"),
+        pytest.param([_UNVERIFIED], f"Bundle ready: anolis-rig.tar.gz. {_UNVERIFIED}", id="unverified"),
+    ],
+)
+def test_bundle_done_event_repeats_an_unverified_install_sh(
+    warnings: list[str], detail: str, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bundle view shows only the latest detail, so the warning rides on "done" (#530)."""
+    monkeypatch.setattr(provision, "_prepare_workspace", lambda params, progress, allow_replace=True: tmp_path)
+
+    def _stage(**kwargs: Any) -> pathlib.Path:
+        for warning in warnings:
+            kwargs["progress_callback"]("unverified", warning)
+        return tmp_path / "anolis-rig.tar.gz"
+
+    monkeypatch.setattr(deploy, "stage_bundle", _stage)
+    job = provision.ProvisionJob(job_id="b1")
+    provision._run_bundle_job(job, {"project": "rig", "arch": "arm64"})
+    assert job.status == "done"
+    assert job.events[-1]["detail"] == detail

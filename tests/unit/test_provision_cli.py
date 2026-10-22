@@ -421,3 +421,44 @@ def test_missing_template_error_points_at_import(tmp_path, monkeypatch) -> None:
     systems_root.mkdir()
     with pytest.raises(FileNotFoundError, match="import the machine's own"):
         installer.provision_project("bioreactor-manual", "p", tmp_path / "prefix", systems_root=systems_root)
+
+
+_UNVERIFIED = "WARNING: install.sh not verified: anolis v0.1.48 predates install.sh in SHA256SUMS"
+
+
+def test_install_repeats_an_unverified_install_sh_below_the_summary(tmp_path, monkeypatch, capsys) -> None:
+    from anolis_workbench.cli import provision_cli
+    from anolis_workbench.core import deploy
+
+    result = deploy.DeployResult(
+        project_name="p", runtime_version="0.1.48", prefix="/opt/anolis", output="", install_sh_warning=_UNVERIFIED
+    )
+    monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+    monkeypatch.setattr(provision_cli.deploy, "deploy_local", lambda **kwargs: result)
+    monkeypatch.setattr(sys, "argv", ["anolis-provision", "install"])
+    assert provision_cli._run_install(provision_cli._parse_args()) == 0
+    out, err = capsys.readouterr()
+    assert "Installation complete!" in out
+    assert f"\n{_UNVERIFIED}\n" in err
+
+
+@pytest.mark.parametrize("success", [True, False], ids=["updated", "failed"])
+def test_update_shows_an_unverified_install_sh(success: bool, monkeypatch, capsys) -> None:
+    from anolis_workbench.cli import provision_cli
+    from anolis_workbench.core import updater
+
+    monkeypatch.setattr(
+        updater,
+        "check_for_update",
+        lambda: updater.UpdateStatus(current_version="0.18.1", latest_version="0.18.2", update_available=True),
+    )
+    monkeypatch.setattr(
+        updater,
+        "perform_update",
+        lambda **kwargs: updater.UpdateResult(
+            success=success, version="0.18.2", error=None if success else "boom", warning=_UNVERIFIED
+        ),
+    )
+    monkeypatch.setattr(sys, "argv", ["anolis-provision", "update"])
+    assert provision_cli._run_update(provision_cli._parse_args()) == (0 if success else 1)
+    assert f"\n{_UNVERIFIED}\n" in capsys.readouterr().err

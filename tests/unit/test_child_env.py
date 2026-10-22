@@ -82,7 +82,7 @@ def test_ssh_executor(secrets: None, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_updater(secrets: None, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     script = tmp_path / "install.sh"
     script.write_text("#!/bin/sh\n", encoding="utf-8")
-    monkeypatch.setattr(updater, "download_install_script", lambda version: script)
+    monkeypatch.setattr(updater, "download_install_script", lambda version: (script, None))
     spawn = _Spawn()
     monkeypatch.setattr(updater.subprocess, "run", spawn)
     updater.perform_update("0.0.1")

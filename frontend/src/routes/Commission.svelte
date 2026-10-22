@@ -170,6 +170,7 @@
       health?: string[];
       observability?: string[];
       grafana_access?: string[];
+      install_sh_warning?: string | null;
     };
     host_preflight?: string[];
     reboot_pending?: boolean;
@@ -185,6 +186,7 @@
     health: string[];
     observability: string[];
     grafanaAccess: string[];
+    installShWarning: string;
   };
   let deployTarget = $state<"local" | "remote">("remote");
   let deployHost = $state<string>("");
@@ -517,6 +519,7 @@
         health: data.summary?.health ?? [],
         observability: data.summary?.observability ?? [],
         grafanaAccess: data.summary?.grafana_access ?? [],
+        installShWarning: data.summary?.install_sh_warning ?? "",
       };
     }
     if (data.stage === "error" || data.stage === "status") {
@@ -531,6 +534,7 @@
         health: [],
         observability: [],
         grafanaAccess: [],
+        installShWarning: "",
       };
     }
     return null;
@@ -587,6 +591,7 @@
             health: [],
             observability: [],
             grafanaAccess: [],
+            installShWarning: "",
           });
         };
       });
@@ -667,6 +672,9 @@
       <strong>Deployed</strong>
       {#if outcome.runtimeVersion}
         <p>anolis-runtime v{outcome.runtimeVersion} is installed.</p>
+      {/if}
+      {#if outcome.installShWarning}
+        <p class="deploy-warning">{outcome.installShWarning}</p>
       {/if}
       {#if outcome.runtimeConfigKept}
         <p>The existing runtime config was kept; the runtime runs it, not this project's.</p>

@@ -100,6 +100,30 @@ describe('Home.svelte', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('says when the updated install.sh could not be checked against SHA256SUMS', async () => {
+    const warning = 'WARNING: install.sh not verified: anolis-workbench v0.18.3 predates install.sh in SHA256SUMS';
+    const fetchMock = vi.fn(async (path: string) =>
+      path === '/api/update-check'
+        ? jsonResponse(200, { current_version: '0.18.2', latest_version: '0.18.3', update_available: true, error: null })
+        : jsonResponse(200, { success: true, version: '0.18.3', error: null, warning }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(Home, {
+      props: {
+        projects: [],
+        templates: [],
+        runtimeStatus: { running: false, active_project: null },
+        onNavigate: vi.fn(),
+        onProjectsRefreshed: vi.fn(async () => {}),
+      },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Update to v0.18.3' }));
+    expect(await screen.findByText(new RegExp(`Updated to v0\\.18\\.3\\..*${warning}`))).toBeInTheDocument();
+  });
+
   it('asks before rolling back, says the service restarts, and names a running project', async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { success: true, output: '', error: null }));
     vi.stubGlobal('fetch', fetchMock);

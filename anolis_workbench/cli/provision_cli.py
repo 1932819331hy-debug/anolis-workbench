@@ -318,6 +318,7 @@ def _print_progress(step: str, detail: str = "") -> None:
         "skip_all": "✓ ",
         "install": "📥",
         "verify": "🔎",
+        "unverified": "⚠️ ",
         "project": "📁",
         "systemd": "⚙️ ",
         "health": "💓",
@@ -403,6 +404,13 @@ def _print_host_followups(result: deploy.DeployResult) -> None:
             f"  ⚠ A reboot is pending on the target ({deploy.REBOOT_REQUIRED_PATH}); "
             "reboot it before relying on hardware."
         )
+
+
+def _print_install_sh_warning(warning: str | None) -> None:
+    """Repeat, below the summary, that install.sh ran without a SHA256SUMS
+    line to check it against (#530); the progress line has scrolled by."""
+    if warning:
+        print(f"\n{warning}", file=sys.stderr)
 
 
 def _print_preserved(result: deploy.DeployResult) -> None:
@@ -533,6 +541,7 @@ def _run_install(args: argparse.Namespace) -> int:
         print()
         print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
         print(f"  ✓ Project: {project_dir}")
+        _print_install_sh_warning(result.install_sh_warning)
         _print_host_followups(result)
         _print_preserved(result)
         _print_health(result)
@@ -703,6 +712,7 @@ def _run_remote(args: argparse.Namespace) -> int:
     print()
     print(f"  ✓ Runtime: anolis-runtime v{result.runtime_version} ({result.prefix})")
     print(f"  ✓ Project: {project_dir}")
+    _print_install_sh_warning(result.install_sh_warning)
     _print_host_followups(result)
     _print_preserved(result)
     _print_health(result)
@@ -857,6 +867,7 @@ def _run_rollback(args: argparse.Namespace) -> int:
     for line in result.output.strip().splitlines()[-6:]:
         print(f"  {line}")
     print("─" * 60)
+    _print_install_sh_warning(result.warning)
     return 0
 
 
@@ -916,9 +927,11 @@ def _run_update(args: argparse.Namespace) -> int:
             print(f"\n  {result.error}")
         else:
             print(f"\n  ✅ Updated to v{result.version}")
+        _print_install_sh_warning(result.warning)
         return 0
     else:
         print(f"\n  ❌ Update failed: {result.error}", file=sys.stderr)
+        _print_install_sh_warning(result.warning)
         return 1
 
 
