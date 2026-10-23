@@ -13,6 +13,36 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-23
+
+### Added
+
+- Local installs from the app work where sudo asks for a password (#230,
+  #489). In a browser on the machine itself (127.0.0.1, localhost or
+  [::1]), Onboarding and Commission's "This machine" deploy show a sudo
+  password field. The password goes to `sudo -k -S` on stdin, never in argv
+  or the environment, and its buffers are zeroed after use. The server
+  accepts it only from a loopback client and answers 403 otherwise; it is
+  never sent to a remote deploy. A wrong password reads "sudo rejected the
+  password; install.sh did not run". Bound to all interfaces, the server
+  also prints and opens `http://127.0.0.1:<port>`. A sudoers rule that names
+  only `/usr/bin/bash` no longer matches the install, which now runs `sh`.
+- Operate's startup safe-state line names the calls anolis 0.1.51 skipped
+  because their device was absent at startup, each with its provider's
+  reason, and any skip makes the line an error (#540,
+  anolishq/anolis#461). On a boot with every device absent it used to read
+  "ran but issued no call, so nothing was driven". A skipped device is not
+  driven when it appears later. A runtime before 0.1.51 reads as before.
+
+### Changed
+
+- The sim-quickstart template pins anolis 0.1.51, and the vendored anolis
+  contracts are synced to 0.1.51 (#542). The runtime HTTP OpenAPI gains the
+  optional `startup_safe_state.skipped_actions` and its `SkippedAction`
+  schema; the other two schemas are unchanged, and the locks record 0.1.51's
+  asset digests.
+- CI's rust-cache action is at digest d1527c8 (#541).
+
 ## [0.18.3] - 2026-10-22
 
 ### Security
