@@ -6,6 +6,7 @@ Tauri desktop UI. Jobs run in background threads; progress is streamed via SSE.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import threading
 import uuid
@@ -15,7 +16,7 @@ from typing import Any
 
 from anolis_workbench.core import canonical, deploy, installer, machine_profile, projects, releases
 from anolis_workbench.core import paths as paths_module
-from anolis_workbench.core.executor import ParamikoSSHExecutor
+from anolis_workbench.core.executor import LocalExecutor, ParamikoSSHExecutor, zero_buffer
 from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
 
 DEFAULT_TEMPLATE = "sim-quickstart"
@@ -96,8 +97,11 @@ def _deploy_error_fields(exc: Exception) -> dict[str, Any]:
     return {"host_preflight": exc.host_preflight, "reboot_pending": exc.reboot_pending}
 
 
-def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
-    """Run install in a background thread, pushing events to the job."""
+def _run_install_job(job: ProvisionJob, params: dict[str, Any], sudo_password: bytearray | None = None) -> None:
+    """Run install in a background thread, pushing events to the job.
+
+    sudo_password is zeroed when the job ends, whatever its outcome.
+    """
 
     def _progress(step: str, detail: str = "") -> None:
         event = {"stage": step, "detail": detail}
@@ -114,6 +118,7 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
             with_telemetry_export=params.get("with_telemetry_export") is True,
             with_observability=params.get("with_observability") is True,
             allow_unmet_host=params.get("allow_unmet_host") is True,
+            executor=LocalExecutor(sudo_password=sudo_password),
             progress_callback=_progress,
         )
         job.events.append(
@@ -139,6 +144,9 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         job.error = str(exc)
         job.status = "failed"
         job.events.append({"stage": "error", "detail": str(exc), **_deploy_error_fields(exc)})
+    finally:
+        if sudo_password is not None:
+            zero_buffer(sudo_password)
 
 
 def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
@@ -233,16 +241,37 @@ def _reject_invalid_names(handler: Any, params: dict[str, Any]) -> bool:
 
 
 def start_install(handler: Any) -> None:
-    """POST /api/provision/install — start a local install job."""
+    """POST /api/provision/install — start a local install job.
+
+    An optional `sudo_password` is taken out of the params, so no job state
+    holds it, and accepted only from a loopback client: the server speaks
+    plain HTTP, and in appliance mode it listens on the network.
+    """
     content_length = int(handler.headers.get("Content-Length", 0))
     body = handler.rfile.read(content_length) if content_length else b"{}"
     params = json.loads(body)
     if _reject_invalid_names(handler, params):
         return
 
+    secret = params.pop("sudo_password", None)
+    if secret is not None and not isinstance(secret, str):
+        handler._json(400, {"error": "'sudo_password' must be a string"})
+        return
+    if secret and not ipaddress.ip_address(handler.client_address[0]).is_loopback:
+        handler._json(403, {"error": "A sudo password is accepted only from this machine (loopback)"})
+        return
+    password = bytearray(secret.encode()) if secret else None
+    del secret
+
     job = _create_job()
-    thread = threading.Thread(target=_run_install_job, args=(job, params), daemon=True)
-    thread.start()
+    thread = threading.Thread(target=_run_install_job, args=(job, params, password), daemon=True)
+    try:
+        thread.start()
+    except BaseException:
+        # The job never ran, so its finally never zeroes the password.
+        if password is not None:
+            zero_buffer(password)
+        raise
 
     handler._json(202, {"job_id": job.job_id})
 

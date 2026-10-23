@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -49,6 +54,141 @@ class TestLocalExecutor:
     def test_file_exists_false(self, tmp_path: Path) -> None:
         executor = LocalExecutor()
         assert executor.file_exists(str(tmp_path / "nope.txt")) is False
+
+
+_PASSWORD = b"pw-7f3c-not-a-real-one"
+_WRAP = ["sh", "-c", 'exec "$0" "$@" </dev/null']
+
+
+@pytest.fixture()
+def fake_sudo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A `sudo` first on PATH that records its argv and env, then runs the
+    command after `--` (or its whole argv, for plain `sudo cmd`).
+
+    With `-S` it reads one line from stdin, as sudo does for the password,
+    unless the returned directory holds a `skip-stdin` file: that stands in
+    for a sudoers rule that runs the command without asking, leaving the
+    password line unread on the command's stdin.
+    """
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "sudo-calls.jsonl"
+    script = bindir / "sudo"
+    script.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        f"log, skip = {str(log)!r}, {str(tmp_path / 'skip-stdin')!r}\n"
+        "args = sys.argv[1:]\n"
+        "line = b''\n"
+        "if '-S' in args and not os.path.exists(skip):\n"
+        "    line = sys.stdin.buffer.readline()\n"
+        "with open(log, 'a') as f:\n"
+        "    f.write(json.dumps({'argv': args, 'env': dict(os.environ), 'stdin': line.hex()}) + '\\n')\n"
+        "cmd = args[args.index('--') + 1 :] if '--' in args else args\n"
+        "os.execvp(cmd[0], cmd)\n"
+    )
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    return tmp_path
+
+
+def _sudo_calls(root: Path) -> list[dict[str, Any]]:
+    log = root / "sudo-calls.jsonl"
+    if not log.exists():
+        return []
+    return [json.loads(line) for line in log.read_text().splitlines()]
+
+
+class TestLocalExecutorSudoPassword:
+    """`sudo -S` reads the password from stdin: never argv, which `ps`
+    shows every user, and never the environment (#230)."""
+
+    def test_password_arrives_on_stdin_and_nowhere_else(self, fake_sudo: Path) -> None:
+        result = LocalExecutor(sudo_password=bytearray(_PASSWORD)).run(["true"], sudo=True)
+
+        assert result.returncode == 0
+        [call] = _sudo_calls(fake_sudo)
+        assert bytes.fromhex(call["stdin"]) == _PASSWORD + b"\n"
+        secret = _PASSWORD.decode()
+        assert not [a for a in call["argv"] if secret in a]
+        assert not [k for k, v in call["env"].items() if secret in k or secret in v]
+        assert secret not in result.stdout + result.stderr
+
+    def test_sudo_neither_uses_nor_refreshes_the_credential_cache(self, fake_sudo: Path) -> None:
+        """-k: a later request with no password cannot ride this one's cache."""
+        LocalExecutor(sudo_password=bytearray(_PASSWORD)).run(["true"], sudo=True)
+
+        [call] = _sudo_calls(fake_sudo)
+        assert call["argv"] == ["-k", "-S", "-p", "", "--", *_WRAP, "true"]
+
+    def test_an_unread_password_line_never_reaches_the_command(self, fake_sudo: Path) -> None:
+        """A sudoers rule that skips the password must not hand the line to
+        the command, whose output reaches the job's error and events."""
+        (fake_sudo / "skip-stdin").touch()
+        result = LocalExecutor(sudo_password=bytearray(_PASSWORD)).run(["cat"], sudo=True)
+
+        assert result.returncode == 0
+        assert result.stdout == ""
+
+    def test_a_failing_install_never_carries_the_password_into_the_job(
+        self, fake_sudo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The install's output tail becomes job.error and the SSE error event."""
+        from anolis_workbench.core import deploy
+        from anolis_workbench.server.routes import provision
+
+        (fake_sudo / "skip-stdin").touch()
+        install_sh = tmp_path / "install.sh"
+        install_sh.write_text('read -r line; echo "read: [$line]"; exit 1\n')
+
+        def _deploy(**kwargs: Any) -> None:
+            deploy._run_install_sh(kwargs["executor"], str(install_sh), [], None)
+
+        monkeypatch.setattr(provision, "_prepare_workspace", lambda params, progress: tmp_path)
+        monkeypatch.setattr(deploy, "_reboot_pending", lambda executor: False)
+        monkeypatch.setattr(deploy, "deploy_local", _deploy)
+        job = provision.ProvisionJob(job_id="leak")
+        provision._run_install_job(job, {"project": "rig"}, bytearray(_PASSWORD))
+
+        assert job.status == "failed"
+        assert "read: [" in str(job.error)
+        assert _PASSWORD.decode() not in str(job.error) + json.dumps(job.events)
+
+    def test_command_input_with_a_password_is_refused(self, fake_sudo: Path) -> None:
+        with pytest.raises(ValueError, match="input"):
+            LocalExecutor(sudo_password=bytearray(_PASSWORD)).run(["cat"], input=b"payload", sudo=True)
+        assert _sudo_calls(fake_sudo) == []
+
+    def test_the_stdin_buffer_is_zeroed_after_the_run(self, fake_sudo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        real_run = subprocess.run
+        seen: list[Any] = []
+
+        def _spy(*args: Any, **kwargs: Any) -> Any:
+            seen.append(kwargs.get("input"))
+            return real_run(*args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", _spy)
+        LocalExecutor(sudo_password=bytearray(_PASSWORD)).run(["true"], sudo=True)
+
+        buf = seen[-1]
+        assert isinstance(buf, bytearray)
+        assert len(buf) == len(_PASSWORD) + 1
+        assert buf == bytearray(len(buf))
+        assert bytes.fromhex(_sudo_calls(fake_sudo)[0]["stdin"]) == _PASSWORD + b"\n"
+
+    def test_without_a_password_sudo_runs_as_before(self, fake_sudo: Path) -> None:
+        LocalExecutor().run(["true"], sudo=True)
+
+        [call] = _sudo_calls(fake_sudo)
+        assert call["argv"] == ["true"]
+        assert call["stdin"] == ""
+
+    def test_zero_buffer_clears_in_place(self) -> None:
+        from anolis_workbench.core.executor import zero_buffer
+
+        buf = bytearray(_PASSWORD)
+        zero_buffer(buf)
+        assert buf == bytearray(len(_PASSWORD))
 
 
 class TestSubprocessSSHExecutor:

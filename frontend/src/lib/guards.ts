@@ -98,3 +98,12 @@ export function describeCrossProjectRunningBanner({
   }
   return "";
 }
+
+/**
+ * True when the page was loaded from the workbench's own machine. The server
+ * speaks plain HTTP, so a password typed on another host would cross the
+ * network; the server refuses one from a non-loopback client as well.
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "[::1]";
+}

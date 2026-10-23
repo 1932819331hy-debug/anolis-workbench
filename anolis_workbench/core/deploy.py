@@ -573,6 +573,10 @@ def _run_install_sh(
     block = host_preflight_block(result.stdout)
     reboot = _reboot_pending(executor)
     if result.returncode != 0:
+        # sudo's own refusal: install.sh never ran. The message carries none
+        # of the command's output.
+        if "incorrect password attempt" in result.stderr:
+            raise DeployError("sudo rejected the password; install.sh did not run. Check it and deploy again.")
         if block and _preflight_needs_attention(block):
             detail = "\n".join(block)
         else:

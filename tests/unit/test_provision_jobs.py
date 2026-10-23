@@ -294,6 +294,35 @@ def test_observability_needs_a_literal_true(calls, monkeypatch: pytest.MonkeyPat
     assert [c["with_observability"] for c in calls] == [True, False, False, False]
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_local_job_runs_sudo_with_the_password_then_zeroes_it(
+    calls, monkeypatch: pytest.MonkeyPatch, fails: bool
+) -> None:
+    """The local executor carries the password; the job clears it on any outcome (#230)."""
+    from anolis_workbench.core.executor import LocalExecutor
+
+    secret = b"pw-7f3c-not-a-real-one"
+    held: list[bytes] = []
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        executor = kwargs["executor"]
+        assert isinstance(executor, LocalExecutor)
+        held.append(bytes(executor._sudo_password or b""))
+        if fails:
+            raise deploy.DeployError("install.sh failed (exit 1)")
+        return deploy.DeployResult(project_name="rig", runtime_version="0.1.45", prefix="/opt/anolis", output="")
+
+    monkeypatch.setattr(deploy, "deploy_local", _deploy)
+    password = bytearray(secret)
+    job = provision.ProvisionJob(job_id="j7")
+    provision._run_install_job(job, {"project": "rig"}, password)
+
+    assert held == [secret]
+    assert password == bytearray(len(secret))
+    assert job.status == ("failed" if fails else "done")
+    assert secret.decode() not in repr(job.events) + str(job.error)
+
+
 @pytest.mark.parametrize(
     "warnings, detail",
     [

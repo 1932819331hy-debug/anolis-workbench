@@ -1,9 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import App from "../../src/App.svelte";
 import Onboarding from "../../src/routes/Onboarding.svelte";
-import { jsonResponse, pathFromInput } from "./helpers";
+import { jsonResponse, pathFromInput, setPageUrl } from "./helpers";
 
 // install.sh v0.1.43's host-preflight block, as the deploy job carries it
 // (ANSI stripped), from a run with the service user out of the bus's group.
@@ -496,5 +496,85 @@ describe("Onboarding.svelte — no install options (#229)", () => {
     setup();
     expect(screen.queryAllByRole("checkbox")).toEqual([]);
     expect(screen.queryAllByRole("combobox")).toEqual([]);
+  });
+});
+
+describe("Onboarding.svelte — sudo password for a local install (#230)", () => {
+  it("sends it in the local install request only, then clears it and keeps it out of storage", async () => {
+    const { posts } = setup();
+    const field = screen.getByLabelText(/Sudo password for this device/) as HTMLInputElement;
+    expect(field.type).toBe("password");
+    await fireEvent.input(field, { target: { value: "pw-7f3c" } });
+
+    await startLocal();
+
+    expect(posts).toEqual([{ url: "/api/provision/install", body: { sudo_password: "pw-7f3c" } }]);
+    expect(sessionStorage.getItem("anolis-workbench.provision-job")).not.toContain("pw-7f3c");
+    expect(field.value).toBe("");
+  });
+
+  it("sends no password field when none was typed", async () => {
+    const { posts } = setup();
+    await startLocal();
+    expect(posts).toEqual([{ url: "/api/provision/install", body: {} }]);
+  });
+
+  it("asks again for Install anyway on a local job, since the first was not kept", async () => {
+    const { posts } = setup(["job-1", "job-2"]);
+    await fireEvent.input(screen.getByLabelText(/Sudo password for this device/), {
+      target: { value: "pw-7f3c" },
+    });
+    const source = await startLocal();
+    source.emit({
+      stage: "error",
+      detail: UNMET_BLOCK.join("\n"),
+      host_preflight: UNMET_BLOCK,
+      reboot_pending: false,
+    });
+    await fireEvent.click(await screen.findByRole("button", { name: "Install anyway…" }));
+    const again = screen.getByLabelText(/Sudo password/) as HTMLInputElement;
+    expect(again.type).toBe("password");
+    expect(again.value).toBe("");
+    await fireEvent.input(again, { target: { value: "pw-7f3c" } });
+    await fireEvent.click(screen.getByRole("button", { name: "Confirm: install anyway" }));
+
+    await waitFor(() => expect(posts.length).toBe(2));
+    expect(posts[1]).toEqual({
+      url: "/api/provision/install",
+      body: { allow_unmet_host: true, sudo_password: "pw-7f3c" },
+    });
+    expect(sessionStorage.getItem("anolis-workbench.provision-job")).not.toContain("pw-7f3c");
+  });
+});
+
+describe("Onboarding.svelte — the sudo password field is offered only on this machine (#230)", () => {
+  afterEach(() => setPageUrl("http://localhost:3000/"));
+
+  it.each(["127.0.0.1", "localhost", "[::1]"])("offers it on %s", (host) => {
+    setPageUrl(`http://${host}:8000/`);
+    setup();
+    expect(screen.getByLabelText(/Sudo password for this device/)).toBeInTheDocument();
+  });
+
+  it("does not offer it to a browser on another host", () => {
+    setPageUrl("http://192.168.1.20:8000/");
+    setup();
+    expect(screen.queryByLabelText(/Sudo password/)).not.toBeInTheDocument();
+    expect(screen.getByText(/sudo password can be entered only/)).toBeInTheDocument();
+  });
+
+  it("does not ask for it again on Install anyway from another host", async () => {
+    setPageUrl("http://192.168.1.20:8000/");
+    setup();
+    const source = await startLocal();
+    source.emit({
+      stage: "error",
+      detail: UNMET_BLOCK.join("\n"),
+      host_preflight: UNMET_BLOCK,
+      reboot_pending: false,
+    });
+    await fireEvent.click(await screen.findByRole("button", { name: "Install anyway…" }));
+    expect(screen.getByRole("button", { name: "Confirm: install anyway" })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Sudo password/)).not.toBeInTheDocument();
   });
 });

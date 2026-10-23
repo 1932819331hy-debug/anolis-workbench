@@ -76,3 +76,44 @@ def test_cli_defaults_forward_none(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["anolis-workbench"])
     cli_main.main()
     assert called == {"host": None, "port": None, "open_browser": None}
+
+
+class _Server:
+    def __init__(self, address, handler):
+        self.address = address
+
+    def serve_forever(self):
+        raise KeyboardInterrupt
+
+
+class _InlineThread:
+    def __init__(self, target, args, daemon):
+        self._run = lambda: target(*args)
+
+    def start(self):
+        self._run()
+
+
+@pytest.mark.parametrize(
+    ("host", "local_url"),
+    [("0.0.0.0", "http://127.0.0.1:3010"), ("::", "http://127.0.0.1:3010"), ("127.0.0.1", "http://127.0.0.1:3010")],
+)
+def test_startup_names_the_loopback_url_for_this_machine(monkeypatch, capsys, host, local_url):
+    """A browser on the device must open a loopback URL, the only kind that
+    offers the sudo password field (#230); http://0.0.0.0 is not one."""
+    opened: list[str] = []
+    monkeypatch.setattr(app_module, "verify_environment", lambda: None)
+    monkeypatch.setattr(app_module.projects_module, "cleanup_stale_running_files", lambda: None)
+    monkeypatch.setattr(app_module, "_WorkbenchServer", _Server)
+    monkeypatch.setattr(app_module, "_open_browser", opened.append)
+    monkeypatch.setattr(app_module.threading, "Thread", _InlineThread)
+
+    app_module.main(host=host, port=3010, open_browser=True)
+
+    out = capsys.readouterr().out
+    assert f"is running at http://{host}:3010" in out
+    if host == "127.0.0.1":
+        assert "On this machine" not in out
+    else:
+        assert f"On this machine, open {local_url}" in out
+    assert opened == [local_url]

@@ -142,3 +142,8 @@ export function pathFromInput(input: RequestInfo | URL): string {
         : input.url;
   return new URL(raw, 'http://localhost').pathname;
 }
+
+/** Serve the page under test from `url`, as a browser on that host would see it. */
+export function setPageUrl(url: string): void {
+  (window as unknown as { happyDOM: { setURL(next: string): void } }).happyDOM.setURL(url);
+}

@@ -402,7 +402,10 @@ class _WorkbenchServer(ThreadingHTTPServer):
 def startup_messages(config: ServerConfig) -> list[str]:
     """What the server prints on start. A headless loopback server (the
     systemd service, appliance mode) also says how to tunnel to it."""
-    lines = [f"Anolis Workbench is running at http://{config.host}:{config.port}", "Close this window to stop."]
+    lines = [f"Anolis Workbench is running at http://{config.host}:{config.port}"]
+    if config.host in ("0.0.0.0", "::"):
+        lines.append(f"On this machine, open http://127.0.0.1:{config.port}")
+    lines.append("Close this window to stop.")
     if config.host in ("127.0.0.1", "localhost", "::1") and not config.open_browser:
         lines.append(tunnel_hint(config.port))
     return lines
@@ -419,6 +422,10 @@ def main(
     server = _WorkbenchServer((config.host, config.port), _Handler)
     server.config = config
     url = f"http://{config.host}:{config.port}"
+    # A wildcard bind is reached from this machine on loopback, the only
+    # origin that offers the sudo password field; 0.0.0.0 is not one.
+    if config.host in ("0.0.0.0", "::"):
+        url = f"http://127.0.0.1:{config.port}"
     # flush: under systemd stdout is a pipe to journald, block-buffered, and
     # a stop by SIGTERM would discard the buffer and these lines with it.
     for line in startup_messages(config):

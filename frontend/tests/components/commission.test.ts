@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import Commission from '../../src/routes/Commission.svelte';
 import {
@@ -8,6 +8,7 @@ import {
   deferred,
   jsonResponse,
   pathFromInput,
+  setPageUrl,
 } from './helpers';
 
 describe('Commission.svelte', () => {
@@ -667,6 +668,61 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
       within(deployVariant).getByRole('option', { name: 'automation (fresh install refuses this)' }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Deploys the saved project; unsaved edits are not included/)).toBeInTheDocument();
+  });
+
+  it('sends a sudo password only with a local deploy, then clears it (#230)', async () => {
+    const { posts } = setup();
+
+    expect(screen.queryByLabelText(/Sudo password/)).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByLabelText('This machine'));
+    const field = screen.getByLabelText(/Sudo password/) as HTMLInputElement;
+    expect(field.type).toBe('password');
+    await fireEvent.input(field, { target: { value: 'pw-7f3c' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+
+    await waitFor(() => expect(posts.length).toBe(1));
+    expect(posts[0]).toEqual({
+      path: '/api/provision/install',
+      body: { project: 'demo', variant: 'manual', sudo_password: 'pw-7f3c' },
+    });
+    expect(field.value).toBe('');
+  });
+
+  it('never sends a password typed for this machine to a remote deploy (#230)', async () => {
+    const { posts } = setup();
+
+    await fireEvent.click(screen.getByLabelText('This machine'));
+    await fireEvent.input(screen.getByLabelText(/Sudo password/), { target: { value: 'pw-7f3c' } });
+    await fireEvent.click(screen.getByLabelText('A remote device over SSH'));
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), {
+      target: { value: 'pi@rig' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+
+    await waitFor(() => expect(posts.length).toBe(1));
+    expect(posts[0]).toEqual({
+      path: '/api/provision/remote',
+      body: { project: 'demo', variant: 'manual', target: 'pi@rig' },
+    });
+  });
+
+  describe('the sudo password field is offered only on this machine (#230)', () => {
+    afterEach(() => setPageUrl('http://localhost:3000/'));
+
+    it.each(['127.0.0.1', 'localhost', '[::1]'])('offers it on %s', async (host) => {
+      setPageUrl(`http://${host}:8000/`);
+      setup();
+      await fireEvent.click(screen.getByLabelText('This machine'));
+      expect(screen.getByLabelText(/Sudo password/)).toBeInTheDocument();
+    });
+
+    it('does not offer it to a browser on another host', async () => {
+      setPageUrl('http://192.168.1.20:8000/');
+      setup();
+      await fireEvent.click(screen.getByLabelText('This machine'));
+      expect(screen.queryByLabelText(/Sudo password/)).not.toBeInTheDocument();
+      expect(screen.getByText(/sudo password can be entered only/)).toBeInTheDocument();
+    });
   });
 
   it('says before deploying that an existing runtime config is kept', () => {

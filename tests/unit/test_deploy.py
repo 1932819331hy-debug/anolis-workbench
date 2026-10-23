@@ -1105,3 +1105,27 @@ def test_grafana_access_brackets_an_ipv6_target(host: str) -> None:
 def test_grafana_access_is_empty_when_the_observability_step_did_not_finish() -> None:
     assert deploy.grafana_access(_install_sh_output("offline"), ssh_target="pi@rig") == []
     assert deploy.grafana_access("✓ health: runtime responding (v0.1.45)\n", ssh_target="pi@rig") == []
+
+
+def test_a_rejected_sudo_password_is_not_reported_as_an_install_failure(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """sudo's own refusal: install.sh never ran (#230)."""
+
+    class _Rejected(RecordingExecutor):
+        def run(self, cmd, *, input=None, sudo=False, timeout=None):
+            super().run(cmd, input=input, sudo=sudo, timeout=timeout)
+            return RunResult(
+                returncode=1,
+                stdout="pw-7f3c",
+                stderr="Sorry, try again.\nsudo: no password was provided\nsudo: 1 incorrect password attempt\n",
+            )
+
+    _stub_fetch(monkeypatch)
+    with pytest.raises(deploy.DeployError) as err:
+        deploy.deploy_local(project_dir=project_dir, project_name="deploy-fixture", executor=_Rejected())
+
+    message = str(err.value)
+    assert message.startswith("sudo rejected the password")
+    assert "install.sh failed" not in message
+    assert "pw-7f3c" not in message

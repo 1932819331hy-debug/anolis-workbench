@@ -17,6 +17,7 @@
 
 <script lang="ts">
   import { fetchJson } from "../lib/api";
+  import { isLoopbackHost } from "../lib/guards";
 
   let {
     onNavigate,
@@ -34,6 +35,8 @@
   // install.sh's host-preflight block ends on this line when the only thing
   // wrong is unmet requirements, the one failure --allow-unmet-host can get past.
   const PREFLIGHT_UNMET = "✗ host preflight: requirements unmet";
+
+  const LOCAL_INSTALL_URL = "/api/provision/install";
 
   type ProvisionEvent = {
     stage: string;
@@ -67,6 +70,10 @@
   let status = $state<OnboardingStatus | null>(null);
   let provisionMode = $state<"local" | "remote" | null>(null);
   let remoteTarget = $state<string>("");
+  // Sent once in a local job's request body, then cleared. It never joins
+  // the job kept in sessionStorage or the request "Install anyway" repeats.
+  let localSudoPassword = $state<string>("");
+  const loopbackClient = isLoopbackHost(window.location.hostname);
   let remoteError = $state<string>("");
   let startError = $state<string>("");
   let starting = $state<boolean>(false);
@@ -202,14 +209,24 @@
     };
   }
 
-  async function startJob(url: string, body: Record<string, unknown>): Promise<void> {
+  function takeSudoPassword(): Record<string, unknown> {
+    const secret = localSudoPassword ? { sudo_password: localSudoPassword } : {};
+    localSudoPassword = "";
+    return secret;
+  }
+
+  async function startJob(
+    url: string,
+    body: Record<string, unknown>,
+    secret: Record<string, unknown> = {},
+  ): Promise<void> {
     starting = true;
     startError = "";
     try {
       const started = await fetchJson<{ job_id: string }>(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, ...secret }),
       });
       const job = { jobId: started.job_id, url, body };
       rememberJob(job);
@@ -222,7 +239,7 @@
   }
 
   function startLocalInstall(): Promise<void> {
-    return startJob("/api/provision/install", {});
+    return startJob(LOCAL_INSTALL_URL, {}, takeSudoPassword());
   }
 
   function showRemoteForm(): void {
@@ -250,7 +267,8 @@
 
   function installAnyway(): Promise<void> {
     if (!lastRequest) return Promise.resolve();
-    return startJob(lastRequest.url, { ...lastRequest.body, allow_unmet_host: true });
+    const secret = lastRequest.url === LOCAL_INSTALL_URL ? takeSudoPassword() : {};
+    return startJob(lastRequest.url, { ...lastRequest.body, allow_unmet_host: true }, secret);
   }
 
   function backToChoose(): void {
@@ -343,6 +361,15 @@
                   The providers above will start with no devices until the host is fixed and the
                   service restarted.
                 </p>
+                {#if lastRequest?.url === LOCAL_INSTALL_URL && loopbackClient}
+                  <label for="unmet-sudo-password">Sudo password (empty if sudo needs none)</label>
+                  <input
+                    id="unmet-sudo-password"
+                    type="password"
+                    autocomplete="off"
+                    bind:value={localSudoPassword}
+                  />
+                {/if}
                 <button
                   type="button"
                   class="btn-primary"
@@ -368,6 +395,25 @@
         </div>
       </div>
     {:else if provisionMode === null}
+      {#if loopbackClient}
+        <div class="form-group">
+          <label for="local-sudo-password">
+            Sudo password for this device (empty if sudo needs none)
+          </label>
+          <input
+            id="local-sudo-password"
+            type="password"
+            autocomplete="off"
+            disabled={starting}
+            bind:value={localSudoPassword}
+          />
+        </div>
+      {:else}
+        <p class="onboarding-note">
+          A sudo password can be entered only in a browser on this machine (localhost).
+        </p>
+      {/if}
+
       <div class="onboarding-options">
         <button
           type="button"

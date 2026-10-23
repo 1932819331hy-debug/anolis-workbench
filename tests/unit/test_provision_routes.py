@@ -24,6 +24,7 @@ class FakeHandler:
         raw = json.dumps(body).encode() if body else b"{}"
         self.rfile = BytesIO(raw)
         self.headers = {"Content-Length": str(len(raw))}
+        self.client_address = ("127.0.0.1", 50000)
         self._responses: list[tuple[int, dict[str, Any]]] = []
         self._sse_data: list[str] = []
         self.wfile = BytesIO()
@@ -53,6 +54,62 @@ class TestStartInstall:
         status, data = handler._responses[0]
         assert status == 202
         assert "job_id" in data
+
+
+class TestStartInstallSudoPassword:
+    """The password leaves the request as a bytearray for the job, and is
+    never kept in the job's params (#230)."""
+
+    @patch("anolis_workbench.server.routes.provision.threading.Thread")
+    def test_password_goes_to_the_job_apart_from_its_params(self, thread: MagicMock) -> None:
+        handler = FakeHandler({"project": "rig", "sudo_password": "pw-7f3c"})
+        handler.client_address = ("127.0.0.1", 50000)
+
+        provision.start_install(handler)
+
+        assert handler._responses[0][0] == 202
+        _job, params, password = thread.call_args.kwargs["args"]
+        assert params == {"project": "rig"}
+        assert isinstance(password, bytearray)
+        assert password == bytearray(b"pw-7f3c")
+
+    @patch("anolis_workbench.server.routes.provision.threading.Thread")
+    def test_no_password_hands_the_job_none(self, thread: MagicMock) -> None:
+        handler = FakeHandler({"project": "rig", "sudo_password": ""})
+        handler.client_address = ("127.0.0.1", 50000)
+
+        provision.start_install(handler)
+
+        assert thread.call_args.kwargs["args"][2] is None
+
+    @patch("anolis_workbench.server.routes.provision.threading.Thread")
+    def test_password_is_zeroed_when_the_job_cannot_start(self, thread: MagicMock) -> None:
+        thread.return_value.start.side_effect = RuntimeError("can't start new thread")
+        handler = FakeHandler({"project": "rig", "sudo_password": "pw-7f3c"})
+
+        with pytest.raises(RuntimeError):
+            provision.start_install(handler)
+
+        password = thread.call_args.kwargs["args"][2]
+        assert password == bytearray(len(b"pw-7f3c"))
+
+    @pytest.mark.parametrize(
+        ("client", "value", "code"),
+        [("192.168.1.20", "pw-7f3c", 403), ("127.0.0.1", 1234, 400)],
+    )
+    @patch("anolis_workbench.server.routes.provision.threading.Thread")
+    def test_refused_off_loopback_or_when_not_a_string(
+        self, thread: MagicMock, client: str, value: object, code: int
+    ) -> None:
+        handler = FakeHandler({"project": "rig", "sudo_password": value})
+        handler.client_address = (client, 50000)
+
+        provision.start_install(handler)
+
+        status, data = handler._responses[0]
+        assert status == code
+        assert "pw-7f3c" not in json.dumps(data)
+        thread.assert_not_called()
 
 
 class TestStartBundle:
