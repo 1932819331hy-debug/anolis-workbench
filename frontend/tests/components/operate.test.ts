@@ -202,6 +202,57 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
     expect(line.textContent).not.toMatch(/fail|accepted/i);
   });
 
+  // anolis#461: a call whose device its provider reported unreachable at
+  // startup is skipped, not failed. That device is not driven when it
+  // appears later, so a skip is never ok.
+  const SKIPPED = [
+    { device_handle: 'bread0/rlht0', function: 'set_power', reason: 'probe failed (version_read_failed): rlht0 did not answer' },
+    { device_handle: 'bread0/dcmt0', function: 'set_open_loop', reason: 'probe failed (version_read_failed): dcmt0 did not answer' },
+  ];
+
+  it('with every device absent, names each skipped call and its reason', async () => {
+    renderOperate(withStartup({ safe_state_achieved: false, skipped_actions: SKIPPED }));
+
+    const line = await screen.findByTestId('startup-safe-state');
+    expect(line).toHaveClass('field-error');
+    expect(line).toHaveTextContent(
+      'Startup safe state (hooks) issued no call: 2 call(s) skipped, device absent at startup: ' +
+        'bread0/rlht0/set_power: probe failed (version_read_failed): rlht0 did not answer; ' +
+        'bread0/dcmt0/set_open_loop: probe failed (version_read_failed): dcmt0 did not answer',
+    );
+    expect(line.textContent).not.toMatch(/nothing was driven|accepted|call\(s\) failed/);
+  });
+
+  it('with the calls that ran accepted and one skipped, says both and is not ok', async () => {
+    renderOperate(withStartup({ skipped_actions: SKIPPED.slice(0, 1) }));
+
+    const line = await screen.findByTestId('startup-safe-state');
+    expect(line).toHaveClass('field-error');
+    expect(line).toHaveTextContent(
+      'Startup safe state (hooks): every call it issued was accepted by its provider. ' +
+        '1 call(s) skipped, device absent at startup: ' +
+        'bread0/rlht0/set_power: probe failed (version_read_failed): rlht0 did not answer',
+    );
+  });
+
+  it('with calls failed and one skipped, names both', async () => {
+    renderOperate(
+      withStartup({
+        safe_state_achieved: false,
+        failed_actions: [{ device_handle: 'p0/heater', function: 'set_power', success: false, error: 'timeout' }],
+        skipped_actions: SKIPPED.slice(1),
+      }),
+    );
+
+    const line = await screen.findByTestId('startup-safe-state');
+    expect(line).toHaveClass('field-error');
+    expect(line).toHaveTextContent(
+      'Startup safe state (hooks): 1 call(s) failed: p0/heater/set_power: timeout. ' +
+        '1 call(s) skipped, device absent at startup: ' +
+        'bread0/dcmt0/set_open_loop: probe failed (version_read_failed): dcmt0 did not answer',
+    );
+  });
+
   it('says outputs were left as they were under on_startup: leave', async () => {
     // The runtime reports the rung as none under leave: nothing ran.
     renderOperate(

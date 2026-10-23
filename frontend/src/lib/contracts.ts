@@ -299,6 +299,17 @@ export interface EstopAction extends UnknownRecord {
   error?: string;
 }
 
+/**
+ * A startup safe-state call the runtime did not issue, because the device's
+ * provider reported it unreachable and it was not registered (runtime-http
+ * `SkippedAction`, anolis#461).
+ */
+export interface SkippedAction extends UnknownRecord {
+  device_handle: string;
+  function: string;
+  reason: string;
+}
+
 /** The `startup_safe_state` block on `GET /v0/runtime/status` (anolis#392). */
 export interface StartupSafeStateStatus extends UnknownRecord {
   on_startup: "safe_state" | "leave";
@@ -306,6 +317,8 @@ export interface StartupSafeStateStatus extends UnknownRecord {
   software_safe_state: SoftwareSafeState;
   safe_state_achieved: boolean;
   failed_actions: EstopAction[];
+  /** Empty from a runtime older than anolis 0.1.51, which does not send it. */
+  skipped_actions: SkippedAction[];
 }
 
 export interface TypedValue extends UnknownRecord {

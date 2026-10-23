@@ -325,6 +325,13 @@ export function extractStartupSafeState(payload: unknown): StartupSafeStateStatu
         success: a.success === true,
         ...(typeof a.error === "string" ? { error: a.error } : {}),
       })),
+    skipped_actions: asArray(r.skipped_actions)
+      .map(asObject)
+      .map((a) => ({
+        device_handle: String(a.device_handle ?? "?"),
+        function: String(a.function ?? "?"),
+        reason: String(a.reason ?? "absent"),
+      })),
   };
 }
 
@@ -333,25 +340,37 @@ export function extractStartupSafeState(payload: unknown): StartupSafeStateStatu
  * `safe_state_achieved` means the rung issued at least one call and every
  * call was accepted by its provider, not that the outputs reached a safe
  * state, so the text says no more than that. `ok` is false when a rung ran
- * and the runtime's verdict is false.
+ * and the runtime's verdict is false, or when any call was skipped.
  */
 export function summarizeStartupSafeState(s: StartupSafeStateStatus): {
   text: string;
   ok: boolean;
 } {
   const head = `Startup safe state (${s.software_safe_state})`;
+  // A skipped call's device was absent at startup, and is not driven when it
+  // appears later (anolis#461): never ok, whatever the calls that ran did.
+  const skipped =
+    s.skipped_actions.length === 0
+      ? ""
+      : `${s.skipped_actions.length} call(s) skipped, device absent at startup: ` +
+        s.skipped_actions.map((a) => `${a.device_handle}/${a.function}: ${a.reason}`).join("; ");
   if (s.ran && s.safe_state_achieved) {
-    return { text: `${head}: every call it issued was accepted by its provider.`, ok: true };
+    const text = `${head}: every call it issued was accepted by its provider.`;
+    return skipped ? { text: `${text} ${skipped}`, ok: false } : { text, ok: true };
   }
   if (s.ran && s.failed_actions.length === 0) {
-    // Only the zero rung with no actuating function issues no call.
+    if (skipped) {
+      return { text: `${head} issued no call: ${skipped}`, ok: false };
+    }
+    // Otherwise only the zero rung with no actuating function issues no call.
     return { text: `${head} ran but issued no call, so nothing was driven.`, ok: false };
   }
   if (s.ran) {
     const detail = s.failed_actions
       .map((a) => `${a.device_handle}/${a.function}: ${a.error ?? "failed"}`)
       .join("; ");
-    return { text: `${head}: ${s.failed_actions.length} call(s) failed: ${detail}`, ok: false };
+    const text = `${head}: ${s.failed_actions.length} call(s) failed: ${detail}`;
+    return { text: skipped ? `${text}. ${skipped}` : text, ok: false };
   }
   if (s.on_startup === "leave") {
     return { text: "Outputs were left as they were at startup (on_startup: leave).", ok: true };
