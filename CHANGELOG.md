@@ -13,16 +13,28 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-10-22
+
 ### Security
 
 - `anolis-provision` and the workbench check a downloaded `install.sh`
   against the `SHA256SUMS` of its release before running it, for install,
-  remote, bundle, rollback and self-update (#530). A mismatch stops the run,
-  and so does a `SHA256SUMS` that cannot be fetched for any reason but a
-  404. A release that has no `SHA256SUMS`, or no line for `install.sh`,
-  still runs, with `WARNING: install.sh not verified: anolis v<x> predates
-  install.sh in SHA256SUMS` in the CLI and in the UI. That covers every
-  anolis release through v0.1.49; #533 turns the warning into a refusal.
+  remote, bundle and rollback (#530, #534). A mismatch stops the run, and so
+  does a `SHA256SUMS` that cannot be fetched for any reason but a 404. A
+  release that has no `SHA256SUMS`, or no line for `install.sh`, still runs,
+  with `WARNING: install.sh not verified: anolis v<x> predates install.sh in
+  SHA256SUMS` in the CLI and in the UI. That covers every anolis release
+  through v0.1.49; anolis v0.1.50 is the first whose `SHA256SUMS` lists
+  `install.sh`. #533 turns the warning into a refusal. Self-update gets the
+  same check, but it cannot download its script yet (#535).
+
+### Changed
+
+- The sim-quickstart template pins anolis 0.1.50, so an install of it
+  checks `install.sh` instead of warning, and the vendored anolis contracts
+  are synced to 0.1.50 (#536). Only the runtime HTTP OpenAPI changes, in
+  two descriptions (anolishq/anolis#453); the locks record 0.1.50's asset
+  digests.
 
 ## [0.18.2] - 2026-10-21
 
