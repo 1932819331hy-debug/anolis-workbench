@@ -2,7 +2,7 @@
   "name": "anolis-workbench-ui",
   "private": true,
   "type": "module",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "engines": {
     "node": ">=20"
   },

@@ -13,6 +13,38 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-10-25
+
+### Fixed
+
+- Compose remounts when the project changes, so a failed save's errors no
+  longer stay on screen under another project (#561, #592).
+- "Continue and discard unsaved changes?" appears only when the edits would
+  be lost: on a project switch or leaving the project, not on a tab switch,
+  which keeps the draft (#562, #593). "Stay Here" leaves the project
+  selector on the project still open.
+- A provider's manual address list keeps what was entered (#563, #594).
+  "Import from devices" merges instead of replacing the list, switching
+  discovery to scan and back restores the list, and duplicate messages
+  name the value as entered ("0x13"), not in decimal.
+- Operate's software stop panel names the runtime config file the
+  project's own `runtime_profiles` maps the variant to, so an imported
+  project's file is right (#564, #595).
+- With no project open, the workspace tabs look disabled and say a
+  project is needed (#569, #596).
+- Compose form details (#578, #597). An empty required field shows its
+  "Required" line only once it is left empty or a save fails; until then
+  its `*` and `aria-required` mark it. A generated device id follows a
+  type change, and a typed one is kept. The empty address placeholder
+  reads "e.g. 0x0A".
+- The header, Home and Operate say they are loading until their first
+  replies arrive, instead of showing "Stopped", "No projects yet", "No
+  devices found" or "No callable functions declared" (#568, #598).
+
+### Changed
+
+- Dependencies: CI's setup-python action digest 6d4fd22 (#602).
+
 ## [0.19.1] - 2026-10-24
 
 ### Fixed
