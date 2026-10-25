@@ -13,6 +13,27 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-10-25
+
+### Fixed
+
+- A software stop no longer waits on project discovery (#612, #615).
+  Every proxied Operate request re-parsed the running project's YAML,
+  and, with a runtime the workbench didn't launch, every project's; on
+  a Pi the launcher's status lookup alone took 0.29 s per request, and a
+  stop waited behind Operate's polls for about 70 s. A project's parse is now reused while
+  its files are unchanged, YAML goes through libyaml where PyYAML has
+  it, and `POST /v0/estop` goes to the runtime the proxy last resolved
+  without reading a project.
+- A status reply sent before a software stop or clear no longer
+  overwrites the latch that the stop or clear reply reported (#614,
+  #617). The card went back to SOFTWARE STOP while the runtime was
+  latched when a slow poll landed after the stop.
+- The `/v0/events` proxy forwards each event as it arrives, and closes
+  the runtime's stream once the tab has gone (#616, #618). It held
+  events until 4 KB had built up and kept the upstream open after the
+  tab closed.
+
 ## [0.20.0] - 2026-10-25
 
 ### Added
