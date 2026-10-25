@@ -1,7 +1,7 @@
 {
   "name": "anolis-workbench-desktop",
   "private": true,
-  "version": "0.19.2",
+  "version": "0.20.0",
   "description": "Tauri desktop wrapper for anolis-workbench",
   "type": "module",
   "scripts": {

@@ -13,6 +13,53 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-25
+
+### Added
+
+- Commission's deploy card has **Check target** (#567, #607). It lists
+  each of the project's pins beside the version installed on the target,
+  here or over SSH, and gives the runtime verdict a deploy would act on.
+  It installs nothing and needs no sudo. The runtime's version is
+  measured from its binary; the providers' come from the target's
+  `manifest.json`, and the card says when that file is missing,
+  unreadable or was written for another runtime version.
+
+### Fixed
+
+- A deploy no longer downgrades a target's runtime unasked (#567, #606).
+  Before fetching install.sh, it runs the target's
+  `<prefix>/bin/anolis-runtime --version`. A pin older than the
+  installed runtime and older than 0.1.45, whose install.sh has no
+  downgrade guard, is refused with nothing fetched or pushed. An older
+  pin from 0.1.45 on is warned about, and install.sh refuses it itself.
+  A runtime that is installed but reports no version is refused too.
+  Offline bundles are not checked: they have no target to ask.
+- Launching or restarting a project that fails validation is refused,
+  and nothing is started or stopped (#414, #604). Restart validates
+  before it stops the running runtime. The commission routes answer 422
+  with the validation errors.
+- Operate shows each function call's result beside its form, "Accepted
+  at <time>" or the runtime's error message, and a software stop clears
+  the forms of every function except those marked not actuating (#580,
+  #603).
+- An absent boolean in a provider form shows its schema default (#609).
+  A DCMT row from an existing config showed bread 0.9.0's "Encoders
+  fitted" unchecked, though bread reads a missing key as true.
+
+### Changed
+
+- The vendored bread config schema is 0.9.0's, which adds
+  `devices[].encoders` (anolishq/anolis-provider-bread#179, #609).
+- The vendored anolis contract locks are 0.1.52's, and the
+  sim-quickstart template pins runtime 0.1.52 (#610). The runtime
+  config, machine-profile and HTTP schemas are unchanged from 0.1.51.
+- The deploy result's startup safe-state line follows install.sh's
+  format from anolis 0.1.52 on: the achieved line names the rung, as in
+  `(hooks)`, and a run that did not happen is a `→` skip line
+  (anolishq/anolis#473, #605).
+- Dependencies: CI's setup-uv action 10.3.2 (#608).
+
 ## [0.19.2] - 2026-10-25
 
 ### Fixed
