@@ -90,7 +90,12 @@
   // the project's own variant file; an installed target keeps its own config,
   // which a redeploy does not overwrite.
   // The file of the variant Launch runs, from the saved project (#339).
-  const safeStateFile = $derived(variantRelpath(saved?.launch ?? activeVariant(system)));
+  // The project's own variant mapping names the file; an imported project's
+  // need not follow the authored naming (wb#564).
+  const safeStateFile = $derived.by(() => {
+    const variant = saved?.launch ?? activeVariant(system);
+    return system?.profile?.runtime_profiles?.[variant] ?? variantRelpath(variant);
+  });
   // Against the SAVED launch variant, as Commission does: Launch reads disk.
   const variantMismatch = $derived(
     launchVariantMismatch(system, editingVariant, saved?.launch ?? activeVariant(system)),
