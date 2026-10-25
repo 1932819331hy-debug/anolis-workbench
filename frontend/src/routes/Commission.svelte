@@ -198,7 +198,13 @@
     verdict: string;
     message: string;
   };
-  type TargetCheck = { runtime: ComponentCheck; providers: ComponentCheck[]; manifest: string };
+  type TargetCheck = {
+    runtime: ComponentCheck;
+    providers: ComponentCheck[];
+    // components.optional, e.g. telemetry_export (#620).
+    optional?: ComponentCheck[];
+    manifest: string;
+  };
   const VERDICT_TEXT: Record<string, string> = {
     fresh: "not installed",
     ok: "",
@@ -208,12 +214,18 @@
     unknown: "not recorded on the target",
   };
   const MANIFEST_NOTE: Record<string, string> = {
-    missing: "The target has no manifest.json, so its provider versions are unknown.",
+    missing:
+      "The target has no manifest.json, so its provider and optional component versions are unknown.",
     unreadable:
-      "The target's manifest.json could not be read, so its provider versions are unknown.",
+      "The target's manifest.json could not be read, so its provider and optional component versions are unknown.",
     stale:
-      "The target's manifest.json was written for another runtime version than the one installed, so its provider versions may be out of date.",
+      "The target's manifest.json was written for another runtime version than the one installed, so its provider and optional component versions may be out of date.",
   };
+  /** The runtime, then providers, then optional components, each one row. */
+  function targetRows(check: TargetCheck): ComponentCheck[] {
+    const optional = (check.optional ?? []).map((c) => ({ ...c, name: `${c.name} (optional)` }));
+    return [check.runtime, ...check.providers, ...optional];
+  }
   let targetChecking = $state<boolean>(false);
   let targetCheck = $state<{ target: string; result: TargetCheck } | null>(null);
   let targetCheckError = $state<string>("");
@@ -1139,7 +1151,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each [check.runtime, ...check.providers] as row, i (i)}
+          {#each targetRows(check) as row, i (i)}
             <tr class:target-version-warning={row.verdict !== "ok" && row.verdict !== "fresh"}>
               <td>{row.name}</td>
               <td>{row.pinned ?? "—"}</td>

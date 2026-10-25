@@ -21,7 +21,7 @@ import shlex
 import shutil
 import tempfile
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any, Callable
 
 import requests
 import yaml
@@ -643,6 +643,9 @@ class ComponentCheck:
 class TargetCheck:
     runtime: ComponentCheck
     providers: list[ComponentCheck]
+    # components.optional (telemetry_export today), recorded in the manifest
+    # the same way as providers (#620).
+    optional: list[ComponentCheck]
     # Where the providers' installed versions come from: install.sh's
     # <prefix>/manifest.json, which records the last install. "ok", "missing",
     # "unreadable", or "stale" when it lists another runtime than the one
@@ -683,12 +686,8 @@ def check_target(
         components = {}
     runtime_entry = components.get("runtime")
     runtime_pin = runtime_entry.get("version") if isinstance(runtime_entry, dict) else None
-    provider_entries = components.get("providers")
-    provider_pins = {
-        name: entry.get("version")
-        for name, entry in (provider_entries.items() if isinstance(provider_entries, dict) else [])
-        if isinstance(entry, dict)
-    }
+    provider_pins = _pins(components.get("providers"))
+    optional_pins = _pins(components.get("optional"))
 
     installed = _installed_runtime_version(executor, prefix)
     if installed is None:
@@ -701,21 +700,41 @@ def check_target(
     if manifest == "ok" and installed is not None and _xyz(str(doc.get("version", ""))) != installed:
         manifest = "stale"
     listed = doc.get("components")
-    recorded = listed.get("providers") if isinstance(listed, dict) else None
+    if not isinstance(listed, dict):
+        listed = {}
+    return TargetCheck(
+        runtime=runtime,
+        providers=_recorded_checks(provider_pins, listed.get("providers"), installed),
+        optional=_recorded_checks(optional_pins, listed.get("optional"), installed),
+        manifest=manifest,
+    )
+
+
+def _pins(entries: Any) -> dict[str, Any]:
+    """A components.providers or components.optional block's version pins."""
+    if not isinstance(entries, dict):
+        return {}
+    return {name: entry.get("version") for name, entry in entries.items() if isinstance(entry, dict)}
+
+
+def _recorded_checks(
+    pins: dict[str, Any], recorded: Any, installed: tuple[int, int, int] | None
+) -> list[ComponentCheck]:
+    """Each pin beside the version the target's manifest records for it."""
     if not isinstance(recorded, dict):
         recorded = {}
-    providers = []
-    for name, pin in sorted(provider_pins.items()):
+    checks = []
+    for name, pin in sorted(pins.items()):
         entry = recorded.get(name)
         have = entry.get("version") if isinstance(entry, dict) else None
         if installed is None:
-            providers.append(ComponentCheck(name, pin, None, "fresh"))
+            checks.append(ComponentCheck(name, pin, None, "fresh"))
         elif not isinstance(have, str) or _xyz(have) is None or _xyz(str(pin or "")) is None:
-            providers.append(ComponentCheck(name, pin, have if isinstance(have, str) else None, "unknown"))
+            checks.append(ComponentCheck(name, pin, have if isinstance(have, str) else None, "unknown"))
         else:
             older = _xyz(str(pin)) < _xyz(have)  # type: ignore[operator]
-            providers.append(ComponentCheck(name, pin, have, "older" if older else "ok"))
-    return TargetCheck(runtime=runtime, providers=providers, manifest=manifest)
+            checks.append(ComponentCheck(name, pin, have, "older" if older else "ok"))
+    return checks
 
 
 def _preflight_needs_attention(block: list[str]) -> bool:

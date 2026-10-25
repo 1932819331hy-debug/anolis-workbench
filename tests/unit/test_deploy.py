@@ -419,18 +419,22 @@ def test_deploy_refuses_a_runtime_whose_version_cannot_be_read(
 _MANIFEST = "/opt/anolis/manifest.json"
 
 
-def _manifest(runtime: str, providers: dict[str, str]) -> str:
-    return json.dumps(
-        {
-            "schema_version": 1,
-            "version": runtime,
-            "components": {
-                "runtime": {"version": runtime},
-                "providers": {n: {"version": v} for n, v in providers.items()},
-            },
-        },
-        indent=2,
-    )
+def _manifest(runtime: str, providers: dict[str, str], optional: dict[str, str] | None = None) -> str:
+    components: dict[str, Any] = {
+        "runtime": {"version": runtime},
+        "providers": {n: {"version": v} for n, v in providers.items()},
+    }
+    if optional is not None:
+        # install.sh writes components.optional only when a pin is declared.
+        components["optional"] = {n: {"version": v} for n, v in optional.items()}
+    return json.dumps({"schema_version": 1, "version": runtime, "components": components}, indent=2)
+
+
+def _pin_optional(project_dir: pathlib.Path, name: str, version: str) -> None:
+    path = project_dir / "machine-profile.yaml"
+    profile = yaml.safe_load(path.read_text(encoding="utf-8"))
+    profile["components"]["optional"] = {name: {"package": "anolis-telemetry-export", "version": version}}
+    path.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
 
 
 class TargetExecutor(InstalledRuntimeExecutor):
@@ -536,6 +540,42 @@ def test_check_target_on_a_fresh_target(project_dir: pathlib.Path) -> None:
     assert [(p.name, p.verdict) for p in check.providers] == [("sim", "fresh")]
     assert check.manifest == "missing"
     assert executor.commands == []
+
+
+@pytest.mark.parametrize(
+    ("recorded", "installed", "verdict"),
+    [
+        ({"telemetry_export": "0.1.1"}, "0.1.1", "ok"),
+        ({"telemetry_export": "0.1.3"}, "0.1.3", "older"),
+        (None, None, "unknown"),
+    ],
+    ids=["same", "newer-installed", "not-recorded"],
+)
+def test_check_target_lists_optional_components_beside_the_manifest(
+    recorded: dict[str, str] | None, installed: str | None, verdict: str, project_dir: pathlib.Path
+) -> None:
+    # bioreactor-v1 pins components.optional.telemetry_export 0.1.1 (#620).
+    _pin_optional(project_dir, "telemetry_export", "0.1.1")
+    executor = TargetExecutor("anolis-runtime 0.1.27\n", _manifest("0.1.27", {"sim": "0.2.5"}, recorded))
+    check = deploy.check_target(executor, project_dir=project_dir)
+    assert [(c.name, c.pinned, c.installed, c.verdict) for c in check.optional] == [
+        ("telemetry_export", "0.1.1", installed, verdict)
+    ]
+    assert [p.name for p in check.providers] == ["sim"]
+    _read_only(executor)
+
+
+def test_check_target_lists_no_optional_components_when_none_are_pinned(project_dir: pathlib.Path) -> None:
+    executor = TargetExecutor(
+        "anolis-runtime 0.1.27\n", _manifest("0.1.27", {"sim": "0.2.5"}, {"telemetry_export": "0.1.1"})
+    )
+    assert deploy.check_target(executor, project_dir=project_dir).optional == []
+
+
+def test_check_target_on_a_fresh_target_lists_optional_pins_as_not_installed(project_dir: pathlib.Path) -> None:
+    _pin_optional(project_dir, "telemetry_export", "0.1.1")
+    check = deploy.check_target(TargetExecutor(None), project_dir=project_dir)
+    assert [(c.name, c.verdict) for c in check.optional] == [("telemetry_export", "fresh")]
 
 
 def test_check_target_refuses_a_runtime_whose_version_cannot_be_read(project_dir: pathlib.Path) -> None:

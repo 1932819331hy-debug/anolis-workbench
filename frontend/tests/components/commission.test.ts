@@ -842,6 +842,28 @@ describe('Commission.svelte — the target check (#567)', () => {
     expect(screen.queryByText(/manifest\.json/)).toBeNull();
   });
 
+  it('lists the optional components the project pins, after the providers (#620)', async () => {
+    setup({
+      status: 200,
+      body: {
+        ...refused,
+        optional: [
+          { name: 'telemetry_export', pinned: '0.1.1', installed: null, verdict: 'unknown', message: '' },
+        ],
+      },
+    });
+    await check();
+
+    const table = await screen.findByRole('table');
+    const last = within(table).getAllByRole('row').at(-1) as HTMLElement;
+    expect(within(last).getAllByRole('cell').map((cell) => cell.textContent)).toEqual([
+      'telemetry_export (optional)',
+      '0.1.1',
+      '—',
+      'not recorded on the target',
+    ]);
+  });
+
   it('reports a target it could not read', async () => {
     setup({ status: 422, body: { error: '/opt/anolis/bin/anolis-runtime on the target reports no version' } });
     await check();

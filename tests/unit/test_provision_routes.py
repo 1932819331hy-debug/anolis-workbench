@@ -272,6 +272,7 @@ class TestCheckTarget:
         return TargetCheck(
             runtime=ComponentCheck("runtime", "0.1.43", "0.1.51", "refuse", "predates the downgrade guard"),
             providers=[ComponentCheck("bread", "0.5.0", "0.8.1", "older")],
+            optional=[ComponentCheck("telemetry_export", "0.1.1", "0.1.1", "ok")],
             manifest="ok",
         )
 
@@ -291,6 +292,9 @@ class TestCheckTarget:
             "message": "predates the downgrade guard",
         }
         assert data["providers"][0]["verdict"] == "older"
+        assert data["optional"] == [
+            {"name": "telemetry_export", "pinned": "0.1.1", "installed": "0.1.1", "verdict": "ok", "message": ""}
+        ]
         assert data["manifest"] == "ok"
         executor = check.call_args.args[0]
         assert isinstance(executor, provision.LocalExecutor)
