@@ -228,3 +228,44 @@ describe("SchemaForm.svelte (sim envelope)", () => {
     });
   });
 });
+
+describe("SchemaForm — the manual address list (#563)", () => {
+  const modeSelect = () =>
+    screen
+      .getAllByRole("combobox")
+      .find((el) => el.querySelectorAll("option[value=scan]").length === 1) as HTMLElement;
+
+  it("import from devices merges, keeping typed entries and not doubling one already there", async () => {
+    const config = breadConfig();
+    (config.devices as UnknownRecord[]).push({ id: "dcmt0", type: "dcmt", address: "0x14" });
+    (config.discovery as UnknownRecord).addresses = ["0x0A", "0x30"];
+    render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged: vi.fn() } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Import from devices" }));
+
+    expect((config.discovery as UnknownRecord).addresses).toEqual(["0x0A", "0x30", "0x14"]);
+  });
+
+  it("import from devices with no device addresses leaves typed entries alone", async () => {
+    const config = breadConfig();
+    config.devices = [];
+    (config.discovery as UnknownRecord).addresses = ["0x30"];
+    render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged: vi.fn() } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Import from devices" }));
+
+    expect((config.discovery as UnknownRecord).addresses).toEqual(["0x30"]);
+  });
+
+  it("switching to scan and back to manual brings the typed list back", async () => {
+    const config = breadConfig();
+    (config.discovery as UnknownRecord).addresses = ["0x0A", "0x30"];
+    render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged: vi.fn() } });
+
+    await fireEvent.change(modeSelect(), { target: { value: "scan" } });
+    expect((config.discovery as UnknownRecord).addresses).toBeUndefined();
+
+    await fireEvent.change(modeSelect(), { target: { value: "manual" } });
+    expect((config.discovery as UnknownRecord).addresses).toEqual(["0x0A", "0x30"]);
+  });
+});

@@ -321,6 +321,35 @@ function normalizeUniqueValue(value: unknown, fieldSchema: SchemaNode | null): u
   return value;
 }
 
+/**
+ * Each duplicate in `normalized`, as first entered in `entered` (the same
+ * list before normalization), so a message reads "0x13" rather than 19.
+ */
+function duplicatesAsEntered(entered: unknown[], normalized: unknown[]): unknown[] {
+  return duplicates(normalized).map((dup) => entered[normalized.indexOf(dup)]);
+}
+
+/**
+ * `existing` plus each entry of `incoming` whose value it does not hold yet,
+ * compared the way the uniqueness check compares them (10 vs "0x0A"). The
+ * entries already in `existing` keep the notation they were entered in.
+ */
+export function mergeUnique(
+  existing: unknown[],
+  incoming: unknown[],
+  fieldSchema: SchemaNode | null,
+): unknown[] {
+  const merged = [...existing];
+  const seen = new Set(existing.map((v) => normalizeUniqueValue(v, fieldSchema)));
+  for (const value of incoming) {
+    const normalized = normalizeUniqueValue(value, fieldSchema);
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    merged.push(value);
+  }
+  return merged;
+}
+
 function duplicates(values: unknown[]): unknown[] {
   const seen = new Set<unknown>();
   const dups: unknown[] = [];
@@ -361,7 +390,7 @@ export function uniqueViolations(
     const items = itemsSchema(schema);
     if (schema["x-anolis-unique"] === true) {
       const normalized = value.map((v) => normalizeUniqueValue(v, items));
-      for (const dup of duplicates(normalized)) {
+      for (const dup of duplicatesAsEntered(value, normalized)) {
         violations.push({
           path,
           message: `Duplicate value ${JSON.stringify(dup)} — values must be unique`,
@@ -371,11 +400,9 @@ export function uniqueViolations(
     if (items) {
       for (const [key, prop] of properties(items)) {
         if (prop["x-anolis-unique"] !== true) continue;
-        const present = value
-          .map((item) => asRecord(item)?.[key])
-          .filter((v) => v !== undefined)
-          .map((v) => normalizeUniqueValue(v, prop));
-        for (const dup of duplicates(present)) {
+        const present = value.map((item) => asRecord(item)?.[key]).filter((v) => v !== undefined);
+        const normalized = present.map((v) => normalizeUniqueValue(v, prop));
+        for (const dup of duplicatesAsEntered(present, normalized)) {
           violations.push({
             path,
             message: `Duplicate ${key} ${JSON.stringify(dup)} — ${key} must be unique`,
@@ -394,30 +421,58 @@ export function uniqueViolations(
 /**
  * Delete keys the current discriminator state forbids (recursively), so a
  * mode switch cannot leave stale keys the provider would reject. Returns
- * whether anything was removed.
+ * whether anything changed.
+ *
+ * With a `stash`, a pruned value is set aside and put back once its key is
+ * allowed again and still unset, so switching a mode away and back does not
+ * lose what was entered (#563). Nothing set aside is ever written while its
+ * key is forbidden.
  */
-export function pruneForbidden(schema: SchemaNode, value: unknown): boolean {
+export function pruneForbidden(
+  schema: SchemaNode,
+  value: unknown,
+  stash?: WeakMap<object, UnknownRecord>,
+): boolean {
   const record = asRecord(value);
   if (!record) return false;
 
   let changed = false;
   const { forbidden } = resolveConditionals(schema, record);
+  // One stash object per record, so a switch that forbids several keys keeps
+  // them all. Only keys set aside by an earlier call are restored below.
+  let aside = stash?.get(record);
+  if (stash && !aside) {
+    aside = {};
+    stash.set(record, aside);
+  }
+  const setAsideEarlier = aside ? Object.keys(aside) : [];
   for (const key of forbidden) {
     if (record[key] !== undefined) {
+      if (aside) aside[key] = record[key];
       delete record[key];
       changed = true;
+    }
+  }
+  if (aside) {
+    for (const key of setAsideEarlier) {
+      if (forbidden.has(key)) continue;
+      if (record[key] === undefined) {
+        record[key] = aside[key];
+        changed = true;
+      }
+      delete aside[key];
     }
   }
   for (const [key, prop] of properties(schema)) {
     const child = record[key];
     if (child === undefined) continue;
     if (isObjectSchema(prop)) {
-      if (pruneForbidden(prop, child)) changed = true;
+      if (pruneForbidden(prop, child, stash)) changed = true;
     } else if (isArraySchema(prop) && Array.isArray(child)) {
       const items = itemsSchema(prop);
       if (items && isObjectSchema(items)) {
         for (const item of child) {
-          if (pruneForbidden(items, item)) changed = true;
+          if (pruneForbidden(items, item, stash)) changed = true;
         }
       }
     }

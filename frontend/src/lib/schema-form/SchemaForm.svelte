@@ -33,8 +33,11 @@
 
   const conditionals = $derived(resolveConditionals(schema, value));
 
+  // What a mode switch pruned, kept for this form so switching back restores it.
+  const pruned = new WeakMap<object, UnknownRecord>();
+
   function handleChanged(): void {
-    pruneForbidden(schema, value);
+    pruneForbidden(schema, value, pruned);
     onChanged();
   }
 

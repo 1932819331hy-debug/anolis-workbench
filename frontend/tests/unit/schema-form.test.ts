@@ -344,3 +344,60 @@ describe("pruneForbidden", () => {
     expect(pruneForbidden(bread, "text")).toBe(false);
   });
 });
+
+describe("duplicate messages use the notation entered (#563)", () => {
+  it("names a duplicate address as typed, not in decimal", () => {
+    const config = { discovery: { mode: "manual", addresses: ["0x13", "0x13"] } };
+    const messages = uniqueViolations(bread, config).map((v) => v.message);
+    expect(messages).toEqual(['Duplicate value "0x13" — values must be unique']);
+  });
+
+  it("names a duplicate device address as typed", () => {
+    const config = {
+      devices: [
+        { id: "a", type: "rlht", address: "0x0A" },
+        { id: "b", type: "dcmt", address: 10 },
+      ],
+    };
+    const messages = uniqueViolations(bread, config).map((v) => v.message);
+    expect(messages).toContain('Duplicate address "0x0A" — address must be unique');
+  });
+});
+
+describe("pruneForbidden with a stash (#563)", () => {
+  // A discriminator that forbids two keys at once.
+  const twoKeys = {
+    type: "object",
+    properties: {
+      mode: { type: "string", enum: ["on", "off"] },
+      rate: { type: "integer" },
+      path: { type: "string" },
+    },
+    allOf: [
+      {
+        if: { properties: { mode: { const: "off" } }, required: ["mode"] },
+        then: { properties: { rate: false, path: false } },
+      },
+    ],
+  };
+
+  it("restores every key one switch pruned when the switch is undone", () => {
+    const stash = new WeakMap<object, UnknownRecord>();
+    const config: UnknownRecord = { mode: "on", rate: 10, path: "x.yaml" };
+
+    config.mode = "off";
+    expect(pruneForbidden(twoKeys, config, stash)).toBe(true);
+    expect(config).toEqual({ mode: "off" });
+
+    config.mode = "on";
+    expect(pruneForbidden(twoKeys, config, stash)).toBe(true);
+    expect(config).toEqual({ mode: "on", rate: 10, path: "x.yaml" });
+  });
+
+  it("does not restore a key in the same call that pruned it", () => {
+    const stash = new WeakMap<object, UnknownRecord>();
+    const config: UnknownRecord = { mode: "off", rate: 10 };
+    pruneForbidden(twoKeys, config, stash);
+    expect(config).toEqual({ mode: "off" });
+  });
+});

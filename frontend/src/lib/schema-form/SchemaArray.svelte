@@ -11,6 +11,7 @@
     isObjectSchema,
     itemsSchema,
     labelFor,
+    mergeUnique,
     parseI2c,
     properties,
     resolveConditionals,
@@ -121,7 +122,9 @@
     if (!i2cImport) return;
     const imported = i2cImport();
     if (imported === null) return;
-    parent[key] = [...imported];
+    // Merge: keep what was typed, add device addresses not already listed (#563).
+    const existing = Array.isArray(parent[key]) ? (parent[key] as unknown[]) : [];
+    parent[key] = mergeUnique(existing, imported, items);
     onChanged();
   }
 
