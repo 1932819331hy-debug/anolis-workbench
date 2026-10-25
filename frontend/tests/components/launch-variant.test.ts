@@ -347,12 +347,10 @@ describe("App: the Compose selector and the launch variant (#339)", () => {
     await fireEvent.click(await screen.findByRole("button", { name: /Remove automation variant/ }));
     const expected = "Editing manual; Launch runs automation";
 
-    // The removal is unsaved, so leaving Compose asks first.
+    // The removal stays unsaved across tab switches, which keep the draft.
     await tab("Commission");
-    await fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
     expect(await screen.findByTestId("launch-variant-mismatch")).toHaveTextContent(expected);
     await tab("Operate");
-    await fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
     await screen.findByRole("heading", { name: "Operate" });
     expect(await screen.findByTestId("launch-variant-mismatch")).toHaveTextContent(expected);
   });
@@ -366,7 +364,6 @@ describe("App: the Compose selector and the launch variant (#339)", () => {
 
     await fireEvent.click(await screen.findByRole("button", { name: /Remove automation variant/ }));
     await tab("Operate");
-    await fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
 
     expect(await screen.findByTestId("safe-state-fix")).toHaveTextContent(
       "config/anolis-runtime.automation.yaml",

@@ -19,9 +19,7 @@ type EvaluateNavigationPromptsOptions = {
 export function evaluateNavigationPrompts({
   dirty,
   currentProject,
-  currentWorkspace,
   nextProject,
-  nextWorkspace,
   runtimeRunning,
   runningProject,
 }: EvaluateNavigationPromptsOptions): NavigationPrompt[] {
@@ -31,16 +29,11 @@ export function evaluateNavigationPrompts({
   const hasNextProject = typeof nextProject === "string" && nextProject !== "";
 
   const switchingProject = hasCurrentProject && hasNextProject && nextProject !== currentProject;
-  const switchingWorkspace =
-    hasCurrentProject &&
-    hasNextProject &&
-    nextProject === currentProject &&
-    typeof currentWorkspace === "string" &&
-    currentWorkspace !== "" &&
-    nextWorkspace !== currentWorkspace;
   const leavingProjectContext = hasCurrentProject && !hasNextProject;
 
-  if (dirty && (switchingProject || switchingWorkspace || leavingProjectContext)) {
+  // Only leaving the project discards the Compose draft. A workspace switch
+  // within it keeps the draft, so prompting there would be false (#562).
+  if (dirty && (switchingProject || leavingProjectContext)) {
     prompts.push({
       id: "unsaved_changes",
       message: "You have unsaved Compose edits. Continue and discard unsaved changes?",

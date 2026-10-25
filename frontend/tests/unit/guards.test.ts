@@ -16,7 +16,8 @@ describe("evaluateNavigationPrompts", () => {
     expect(prompts).toEqual([]);
   });
 
-  it("requires unsaved-change confirmation when switching workspace in same project", () => {
+  // A tab switch keeps the Compose draft, so a discard prompt there is false (#562).
+  it("does not prompt for unsaved changes when switching workspace in same project", () => {
     const prompts = evaluateNavigationPrompts({
       dirty: true,
       currentProject: "alpha",
@@ -26,8 +27,20 @@ describe("evaluateNavigationPrompts", () => {
       runtimeRunning: false,
       runningProject: "",
     });
-    expect(prompts).toHaveLength(1);
-    expect(prompts[0].id).toBe("unsaved_changes");
+    expect(prompts).toEqual([]);
+  });
+
+  it("requires unsaved-change confirmation when switching project", () => {
+    const prompts = evaluateNavigationPrompts({
+      dirty: true,
+      currentProject: "alpha",
+      currentWorkspace: "compose",
+      nextProject: "beta",
+      nextWorkspace: "compose",
+      runtimeRunning: false,
+      runningProject: "",
+    });
+    expect(prompts.map((p) => p.id)).toEqual(["unsaved_changes"]);
   });
 
   it("requires unsaved-change confirmation when leaving project context", () => {
