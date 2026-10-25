@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { fetchJson } from "../lib/api";
+  import { ApiResponseError, fetchJson } from "../lib/api";
   import type {
     AutomationStatus,
     Device,
@@ -109,6 +109,10 @@
   let modeFeedback = $state<string>("");
   let modeFeedbackClass = $state<string>("field-note");
   let setModeRunning = $state<boolean>(false);
+  // The runtime's reason when it has no mode to set: GET /v0/mode answers
+  // UNAVAILABLE without the automation layer, while /v0/runtime/status still
+  // reports the mode (wb#582).
+  let modeFixedReason = $state<string>("");
 
   // ── E-stop state (wb#236) ───────────────────────────────────────────────────
   let estop = $state<EstopStatus | null>(null);
@@ -258,6 +262,7 @@
     automationFault = null;
     behaviorTree = "";
     modeSelectorDirty = false;
+    modeFixedReason = "";
     streamStatus = { state: "disconnected", attempts: 0 };
     mode = "--";
     modeBadgeClass = "unknown";
@@ -330,15 +335,12 @@
       fetchJson<UnknownRecord>("/v0/automation/tree"),
     ]);
 
-    if (modeRes.status === "fulfilled") {
-      const m = extractMode(modeRes.value) ?? "UNKNOWN";
-      mode = m;
-      modeBadgeClass = "ok";
-      if (!modeSelectorDirty) modeSelectorValue = m;
-    } else {
-      mode = "UNKNOWN";
-      modeBadgeClass = "unavailable";
-    }
+    if (modeRes.status === "fulfilled") applyMode(modeRes.value);
+    else
+      applyModeFailure(
+        modeRes.reason,
+        rtRes.status === "fulfilled" ? extractRuntimeStatus(rtRes.value).mode : null,
+      );
 
     providerHealth = phRes.status === "fulfilled" ? extractProvidersHealth(phRes.value) : [];
 
@@ -387,12 +389,30 @@
 
   async function refreshModeOnly(): Promise<void> {
     try {
-      const p = await fetchJson<UnknownRecord>("/v0/mode");
-      const m = extractMode(p) ?? "UNKNOWN";
-      mode = m;
+      applyMode(await fetchJson<UnknownRecord>("/v0/mode"));
+    } catch (err) {
+      applyModeFailure(err, runtimeStatusData?.mode ?? null);
+    }
+  }
+
+  function applyMode(payload: UnknownRecord): void {
+    const m = extractMode(payload) ?? "UNKNOWN";
+    mode = m;
+    modeBadgeClass = "ok";
+    modeFixedReason = "";
+    if (!modeSelectorDirty) modeSelectorValue = m;
+  }
+
+  function applyModeFailure(err: unknown, statusMode: string | null): void {
+    const code =
+      err instanceof ApiResponseError
+        ? (err.payload as { status?: { code?: unknown } } | null)?.status?.code
+        : undefined;
+    modeFixedReason = code === "UNAVAILABLE" && err instanceof Error ? err.message : "";
+    if (statusMode && statusMode !== "UNKNOWN") {
+      mode = statusMode;
       modeBadgeClass = "ok";
-      if (!modeSelectorDirty) modeSelectorValue = m;
-    } catch {
+    } else {
       mode = "UNKNOWN";
       modeBadgeClass = "unavailable";
     }
@@ -1088,28 +1108,36 @@
     <div class="operate-section operate-mode-section">
       <h3>Mode</h3>
       <div class="mode-row">
-        <span>Current: <span class="badge {modeBadgeClass}">{mode}</span></span>
-        <select
-          value={modeSelectorValue}
-          onchange={(e: Event) => {
-            modeSelectorValue = selectTarget(e).value;
-            modeSelectorDirty = true;
-          }}
-        >
-          {#each RUNTIME_MODES as runtimeMode (runtimeMode)}
-            <option value={runtimeMode}>{runtimeMode}</option>
-          {/each}
-        </select>
-        <button
-          type="button"
-          class="btn-secondary btn-sm"
-          disabled={setModeRunning}
-          onclick={setMode}
-        >
-          {setModeRunning ? "Setting…" : "Set Mode"}
-        </button>
-        {#if modeFeedback}
-          <span class={modeFeedbackClass}>{modeFeedback}</span>
+        <span>
+          Current: <span class="badge {modeBadgeClass}" data-testid="mode-badge">{mode}</span>
+        </span>
+        {#if modeFixedReason}
+          <span class="field-note" data-testid="mode-fixed">
+            Mode can't be set: {modeFixedReason}.
+          </span>
+        {:else}
+          <select
+            value={modeSelectorValue}
+            onchange={(e: Event) => {
+              modeSelectorValue = selectTarget(e).value;
+              modeSelectorDirty = true;
+            }}
+          >
+            {#each RUNTIME_MODES as runtimeMode (runtimeMode)}
+              <option value={runtimeMode}>{runtimeMode}</option>
+            {/each}
+          </select>
+          <button
+            type="button"
+            class="btn-secondary btn-sm"
+            disabled={setModeRunning}
+            onclick={setMode}
+          >
+            {setModeRunning ? "Setting…" : "Set Mode"}
+          </button>
+          {#if modeFeedback}
+            <span class={modeFeedbackClass}>{modeFeedback}</span>
+          {/if}
         {/if}
       </div>
     </div>

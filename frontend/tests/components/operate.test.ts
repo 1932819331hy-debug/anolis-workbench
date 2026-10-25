@@ -798,3 +798,53 @@ describe('Operate.svelte — a status reply older than the last stop or clear (#
     expect(screen.getByTestId('other-project-latch')).toBeInTheDocument();
   });
 });
+
+describe('Operate.svelte — the Mode card without the automation layer (#582)', () => {
+  const ESTOP = { software_safe_state: 'zero', uncovered_actuating_functions: 0 };
+
+  /** `modeReply` answers GET /v0/mode; runtime status reports MANUAL. */
+  function renderWithMode(modeReply: () => Response) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = pathFromInput(input);
+        if (path === '/api/status') return jsonResponse(200, RUNNING);
+        if (path === '/v0/runtime/status') return status(ESTOP);
+        if (path === '/v0/mode') return modeReply();
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, {
+      props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING },
+    });
+  }
+
+  it("shows the runtime-status mode and the runtime's reason in place of Set Mode", async () => {
+    renderWithMode(() =>
+      jsonResponse(503, { status: { code: 'UNAVAILABLE', message: 'Automation layer not enabled' } }),
+    );
+
+    expect(await screen.findByTestId('mode-fixed')).toHaveTextContent(
+      "Mode can't be set: Automation layer not enabled.",
+    );
+    expect(screen.getByTestId('mode-badge')).toHaveTextContent('MANUAL');
+    expect(screen.queryByRole('button', { name: 'Set Mode' })).not.toBeInTheDocument();
+  });
+
+  it('keeps Set Mode when /v0/mode fails for another reason, and shows the runtime-status mode', async () => {
+    renderWithMode(() => jsonResponse(502, { error: 'Runtime proxy failed: timed out' }));
+
+    expect(await screen.findByText(/Uptime 1s/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('mode-badge')).toHaveTextContent('MANUAL'));
+    expect(screen.getByRole('button', { name: 'Set Mode' })).toBeInTheDocument();
+    expect(screen.queryByTestId('mode-fixed')).not.toBeInTheDocument();
+  });
+
+  it('shows the mode /v0/mode reports when the automation layer is on', async () => {
+    renderWithMode(() => jsonResponse(200, { status: { code: 'OK' }, mode: 'AUTO' }));
+
+    await waitFor(() => expect(screen.getByTestId('mode-badge')).toHaveTextContent('AUTO'));
+    expect(screen.getByRole('button', { name: 'Set Mode' })).toBeInTheDocument();
+    expect(screen.queryByTestId('mode-fixed')).not.toBeInTheDocument();
+  });
+});
