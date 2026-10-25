@@ -55,6 +55,7 @@
     appendEventTrace,
     buildTraceEvent,
     createOperateEventStreamManager,
+    removeDevice,
   } from "../lib/operate-events";
 
   let {
@@ -376,15 +377,6 @@
     try {
       const p = await fetchJson<UnknownRecord>("/v0/parameters");
       parameters = extractParameters(p);
-    } catch {
-      /* best-effort */
-    }
-  }
-
-  async function refreshProviderHealthOnly(): Promise<void> {
-    try {
-      const p = await fetchJson<UnknownRecord>("/v0/providers/health");
-      providerHealth = extractProvidersHealth(p);
     } catch {
       /* best-effort */
     }
@@ -742,7 +734,7 @@
     else if (eventType === "mode_change") consumeModeChangeEvent(payload);
     else if (eventType === "parameter_change") void refreshParametersOnly();
     else if (eventType === "automation_fault") consumeAutomationFaultEvent(payload);
-    else if (eventType === "provider_health_change") void refreshProviderHealthOnly();
+    else if (eventType === "device_removed") consumeDeviceRemovedEvent(payload);
     addTraceEvent(eventType, payload);
   }
 
@@ -756,6 +748,14 @@
     const buf = [...eventTrace];
     appendEventTrace(buf, ev, EVENT_TRACE_LIMIT);
     eventTrace = buf;
+  }
+
+  function consumeDeviceRemovedEvent(payload: UnknownRecord): void {
+    const next = removeDevice({ devices, deviceStates, capabilities, selectedKey }, payload);
+    devices = next.devices;
+    deviceStates = next.deviceStates;
+    capabilities = next.capabilities;
+    selectedKey = next.selectedKey;
   }
 
   function consumeStateEvent(payload: UnknownRecord): void {

@@ -863,3 +863,69 @@ describe('Operate.svelte — the Mode card without the automation layer (#582)',
     expect(screen.queryByTestId('mode-fixed')).not.toBeInTheDocument();
   });
 });
+
+describe('Operate.svelte — a device_removed event (#516)', () => {
+  /** An EventSource that records its listeners, so the test can deliver a named event. */
+  class ListeningEventSource {
+    static last: ListeningEventSource | null = null;
+    listeners: Record<string, (event: MessageEvent<string>) => void> = {};
+    onmessage: ((event: MessageEvent<string>) => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    onopen: ((event: Event) => void) | null = null;
+    constructor(public url: string) {
+      ListeningEventSource.last = this;
+    }
+    addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void {
+      this.listeners[type] = listener;
+    }
+    removeEventListener(): void {}
+    close(): void {}
+    emit(type: string, data: unknown): void {
+      this.listeners[type]?.(new MessageEvent(type, { data: JSON.stringify(data) }));
+    }
+  }
+
+  const DEV0 = { provider_id: 'sim0', device_id: 'dev0', display_name: 'Heater' };
+  const DEV1 = { provider_id: 'sim0', device_id: 'dev1', display_name: 'Pump' };
+
+  it('drops the selected device at once, and fetches its capabilities anew when it returns', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.stubGlobal('EventSource', ListeningEventSource as unknown as typeof EventSource);
+    const runtime = { devices: [DEV0, DEV1], capabilityReads: [] as string[] };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = pathFromInput(input);
+        if (path === '/api/status') return jsonResponse(200, RUNNING);
+        if (path === '/v0/runtime/status') return status({ software_safe_state: 'zero', uncovered_actuating_functions: 0 });
+        if (path === '/v0/devices') return jsonResponse(200, { devices: runtime.devices });
+        const caps = path.match(/^\/v0\/devices\/sim0\/(dev\d)\/capabilities$/);
+        if (caps) {
+          runtime.capabilityReads.push(caps[1]);
+          return jsonResponse(200, { capabilities: { signals: [], functions: [] } });
+        }
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, { props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING } });
+
+    expect(await screen.findByRole('button', { name: 'Heater (sim0/dev0)' })).toBeInTheDocument();
+    await waitFor(() => expect(runtime.capabilityReads).toEqual(['dev0']));
+    expect(screen.getByRole('heading', { name: 'Heater (sim0/dev0)' })).toBeInTheDocument();
+
+    // A supervised restart republished the inventory without dev0.
+    runtime.devices = [DEV1];
+    ListeningEventSource.last?.emit('device_removed', { provider_id: 'sim0', device_id: 'dev0', timestamp_ms: 1 });
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Heater (sim0/dev0)' })).not.toBeInTheDocument());
+    expect(screen.getByText('Select a device to inspect signals and execute functions.')).toBeInTheDocument();
+    expect(screen.getByText('sim0/dev0 removed')).toBeInTheDocument();
+
+    // A later restart brings dev0 back; the next poll lists and selects it.
+    runtime.devices = [DEV0, DEV1];
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await waitFor(() => expect(runtime.capabilityReads).toEqual(['dev0', 'dev0']));
+    expect(screen.getByRole('heading', { name: 'Heater (sim0/dev0)' })).toBeInTheDocument();
+  });
+});

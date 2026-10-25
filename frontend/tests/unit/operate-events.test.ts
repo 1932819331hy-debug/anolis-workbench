@@ -6,6 +6,7 @@ import {
   buildTraceEvent,
   createOperateEventStreamManager,
   describeEvent,
+  removeDevice,
 } from "../../src/lib/operate-events";
 
 type Listener = (event: { data: string }) => void;
@@ -70,7 +71,7 @@ describe("operate-events helpers", () => {
       "mode_change",
       "parameter_change",
       "automation_fault",
-      "provider_health_change",
+      "device_removed",
     ]);
   });
 
@@ -95,8 +96,8 @@ describe("operate-events helpers", () => {
       }),
     ).toBe("target_temp: 20 -> 21");
     expect(describeEvent("automation_fault", { locus: "tick", error: "boom" })).toBe("tick: boom");
-    expect(describeEvent("provider_health_change", { provider_id: "sim0", state: "FAULT" })).toBe(
-      "sim0: FAULT",
+    expect(describeEvent("device_removed", { provider_id: "sim0", device_id: "dev0" })).toBe(
+      "sim0/dev0 removed",
     );
     expect(
       describeEvent("quality_change", {
@@ -233,4 +234,39 @@ describe("createOperateEventStreamManager", () => {
 
     manager.disconnect();
   });
+});
+
+describe("removeDevice (wb#516)", () => {
+  const cache = () => ({
+    devices: [
+      { provider_id: "sim0", device_id: "dev0" },
+      { provider_id: "sim0", device_id: "dev1" },
+    ],
+    deviceStates: { "sim0/dev0": ["s0"], "sim0/dev1": ["s1"] },
+    capabilities: { "sim0/dev0": "c0", "sim0/dev1": "c1" },
+    selectedKey: "sim0/dev0",
+  });
+
+  it("removing the selected device clears the selection and both cache entries", () => {
+    const next = removeDevice(cache(), { provider_id: "sim0", device_id: "dev0" });
+    expect(next.devices).toEqual([{ provider_id: "sim0", device_id: "dev1" }]);
+    expect(next.deviceStates).toEqual({ "sim0/dev1": ["s1"] });
+    expect(next.capabilities).toEqual({ "sim0/dev1": "c1" });
+    expect(next.selectedKey).toBe("");
+  });
+
+  it("removing an unselected device leaves the selection alone", () => {
+    const next = removeDevice(cache(), { provider_id: "sim0", device_id: "dev1" });
+    expect(next.devices).toEqual([{ provider_id: "sim0", device_id: "dev0" }]);
+    expect(Object.keys(next.capabilities)).toEqual(["sim0/dev0"]);
+    expect(next.selectedKey).toBe("sim0/dev0");
+  });
+
+  it.each([{ device_id: "dev0" }, { provider_id: "sim0" }, { provider_id: "", device_id: "dev0" }])(
+    "a payload missing an id changes nothing: %o",
+    (payload) => {
+      const before = cache();
+      expect(removeDevice(before, payload)).toEqual(cache());
+    },
+  );
 });

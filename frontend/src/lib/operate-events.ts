@@ -8,7 +8,7 @@ export const DEFAULT_SSE_EVENT_TYPES = [
   "mode_change",
   "parameter_change",
   "automation_fault",
-  "provider_health_change",
+  "device_removed",
 ] as const;
 
 export type OperateConnectionState = "connected" | "disconnected" | "reconnecting" | "stale";
@@ -64,8 +64,8 @@ export function describeEvent(eventType: string, payload: UnknownRecord | null):
     const locus = typeof locusRaw === "string" && locusRaw !== "" ? `${locusRaw}: ` : "";
     return `${locus}${payload.error ?? "Unknown automation fault"}`;
   }
-  if (eventType === "provider_health_change") {
-    return `${payload.provider_id ?? "provider"}: ${payload.state ?? payload.new_state ?? "UNKNOWN"}`;
+  if (eventType === "device_removed") {
+    return `${payload.provider_id ?? "provider"}/${payload.device_id ?? "device"} removed`;
   }
   if (eventType === "state_update") {
     return `${payload.provider_id ?? "provider"}/${payload.device_id ?? "device"} ${payload.signal_id ?? "signal"}`;
@@ -74,6 +74,39 @@ export function describeEvent(eventType: string, payload: UnknownRecord | null):
     return `${payload.provider_id ?? "provider"}/${payload.device_id ?? "device"} ${payload.signal_id ?? "signal"} -> ${payload.new_quality ?? "UNKNOWN"}`;
   }
   return JSON.stringify(payload);
+}
+
+/** Operate's per-device state, keyed by `provider_id/device_id`. */
+export type OperateDeviceCache<D, S, C> = {
+  devices: D[];
+  deviceStates: Record<string, S>;
+  capabilities: Record<string, C>;
+  selectedKey: string;
+};
+
+/**
+ * Drop a device a `device_removed` event names (wb#516): from the list, from
+ * both caches, and from the selection, so a device that comes back under the
+ * same key has its capabilities fetched again. A payload missing either id
+ * names no key, so it changes nothing.
+ */
+export function removeDevice<D extends { provider_id: string; device_id: string }, S, C>(
+  cache: OperateDeviceCache<D, S, C>,
+  payload: UnknownRecord,
+): OperateDeviceCache<D, S, C> {
+  const providerId = typeof payload.provider_id === "string" ? payload.provider_id : "";
+  const deviceId = typeof payload.device_id === "string" ? payload.device_id : "";
+  const key = `${providerId}/${deviceId}`;
+  const deviceStates = { ...cache.deviceStates };
+  const capabilities = { ...cache.capabilities };
+  delete deviceStates[key];
+  delete capabilities[key];
+  return {
+    devices: cache.devices.filter((d) => d.provider_id !== providerId || d.device_id !== deviceId),
+    deviceStates,
+    capabilities,
+    selectedKey: cache.selectedKey === key ? "" : cache.selectedKey,
+  };
 }
 
 export function buildTraceEvent(
