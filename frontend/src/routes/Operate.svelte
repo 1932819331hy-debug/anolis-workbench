@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
+  import InfoToggle from "../lib/InfoToggle.svelte";
   import type {
     AutomationStatus,
     Device,
@@ -982,128 +983,130 @@
     </div>
   {:else}
     <!-- Software stop (wb#236) — thin trigger over POST /v0/estop. NOT an
-         emergency stop: it commands devices that stay powered. -->
+         emergency stop: it commands devices that stay powered. One row at
+         button height (wb#613): the detail sits behind click-open notes, and
+         what needs attention stays in the row. -->
     <div class="operate-section operate-estop-section">
-      <h3>Software Stop</h3>
-      {#if !estop}
-        <!-- POST /v0/estop needs no prior status, so the stop is offered before
-             the first status reply and when the runtime never reports its rung
-             (wb#553). -->
-        <div class="estop-row">
-          <button type="button" class="btn-estop" disabled={estopRunning} onclick={triggerEstop}>
-            {estopRunning ? "ENGAGING…" : "SOFTWARE STOP"}
-          </button>
-          <div class="estop-info">
-            <p class="placeholder">
-              {statusSettled
-                ? "Software safe-state: not observed. The runtime has not reported it."
-                : "Software safe-state: loading the runtime's status…"}
-            </p>
-            {@render safeStateFix()}
-          </div>
-        </div>
-      {:else if estop.latched}
-        <div class="estop-latched-banner">
-          <span class="estop-latched-title">SAFE-STATE ENGAGED — actuation latched</span>
-          <span class="estop-latched-meta">
-            Latched at {formatEpochMs(estop.latched_at_epoch_ms)}. Actuating commands are refused
-            until cleared.
+      <div class="estop-row" class:estop-row-latched={estop?.latched === true}>
+        <!-- The stop stays offered whatever the latch reads: stopping a latched
+             runtime is harmless, and a stale read must never hide it (wb#553).
+             POST /v0/estop needs no prior status. -->
+        <button type="button" class="btn-estop" disabled={estopRunning} onclick={triggerEstop}>
+          {estopRunning
+            ? "ENGAGING…"
+            : estop?.software_safe_state === "none" && !estop.latched
+              ? "SOFTWARE STOP (latch only)"
+              : "SOFTWARE STOP"}
+        </button>
+        {#if !estop}
+          <span class="estop-chip" data-testid="estop-state">
+            {statusSettled ? "Safe state not observed" : "Loading safe state…"}
           </span>
-          <div class="estop-clear-row">
-            {#if clearArmed}
-              <button
-                type="button"
-                class="btn-secondary btn-sm"
-                disabled={clearRunning}
-                onclick={clearEstop}
-              >
-                {clearRunning ? "Clearing…" : "Confirm clear — re-enables actuation"}
-              </button>
-              <button
-                type="button"
-                class="btn-secondary btn-sm"
-                disabled={clearRunning}
-                onclick={() => (clearArmed = false)}
-              >
-                Cancel
-              </button>
-            {:else}
-              <button type="button" class="btn-secondary btn-sm" onclick={clearEstop}>
-                Clear latch…
-              </button>
-            {/if}
-          </div>
-        </div>
-      {:else}
-        <div class="estop-row">
-          <button type="button" class="btn-estop" disabled={estopRunning} onclick={triggerEstop}>
-            {estopRunning
-              ? "ENGAGING…"
-              : estop.software_safe_state === "none"
-                ? "SOFTWARE STOP (latch only)"
-                : "SOFTWARE STOP"}
-          </button>
-          <div class="estop-info">
-            {#if estop.software_safe_state === "hooks"}
-              <span class="field-note"
-                >Latches actuation, then runs the declared safe-state hooks.</span
-              >
-            {:else if estop.software_safe_state === "setpoints"}
-              <span class="field-note"
-                >Latches actuation, then drives the declared safe setpoints.</span
-              >
-            {:else if estop.software_safe_state === "zero"}
-              <span class="field-note"
-                >The project declares zero_is_safe: latches actuation, then tries to drive every
-                actuating function to zero.</span
-              >
-            {:else}
-              <span class="field-error">
-                No software safe-state is declared for this machine. The e-stop drives nothing: it
-                only latches actuation (blocks new commands). Use the hardware e-stop to make the
-                machine safe.
-              </span>
-            {/if}
-            <span class="field-note">
-              As reported by {runtimeStatusData?.version
-                ? `runtime v${runtimeStatusData.version}`
-                : "the runtime"}.
-            </span>
+          <InfoToggle label="About the software stop">
+            {statusSettled
+              ? "Software safe-state: not observed. The runtime has not reported it."
+              : "Software safe-state: loading the runtime's status…"}
             {@render safeStateFix()}
-            {#if dispatchableCoverage}
-              <!-- The functions the active rung will not drive. Under none it
-                   drives nothing, which the note above already says. -->
-              {#if estop.software_safe_state !== "none" && estop.uncovered_actuating_functions > 0}
-                <span class="field-error">
-                  {estop.uncovered_actuating_functions} actuating function(s) the e-stop will not drive.
-                </span>
-              {/if}
-            {:else if estop.software_safe_state === "none" && estop.uncovered_actuating_functions > 0}
-              <!-- An older runtime counts functions with no matching setpoint,
-                   which is only meaningful as the reason setpoints were not chosen. -->
-              <span class="field-error">
-                {estop.uncovered_actuating_functions} actuating function(s) have no declared safe setpoint,
-                which is why setpoints are not used.
-              </span>
+          </InfoToggle>
+        {:else if estop.latched}
+          <span class="estop-latched-title" data-testid="estop-state">
+            SAFE-STATE ENGAGED at {formatEpochMs(estop.latched_at_epoch_ms)}
+          </span>
+          <InfoToggle label="About the latch">
+            Actuation is latched: actuating commands are refused until cleared.
+          </InfoToggle>
+          {#if clearArmed}
+            <button
+              type="button"
+              class="btn-secondary btn-sm"
+              disabled={clearRunning}
+              onclick={clearEstop}
+            >
+              {clearRunning ? "Clearing…" : "Confirm clear — re-enables actuation"}
+            </button>
+            <button
+              type="button"
+              class="btn-secondary btn-sm"
+              disabled={clearRunning}
+              onclick={() => (clearArmed = false)}
+            >
+              Cancel
+            </button>
+          {:else}
+            <button type="button" class="btn-secondary btn-sm" onclick={clearEstop}>
+              Clear latch…
+            </button>
+          {/if}
+        {:else}
+          {#if estop.software_safe_state === "none"}
+            <span class="estop-chip field-error" data-testid="estop-state">
+              No safe state declared: latch only
+            </span>
+          {:else}
+            <span class="estop-chip" data-testid="estop-state">Ready</span>
+          {/if}
+          <InfoToggle label="About the software stop">
+            {#if estop.software_safe_state === "hooks"}
+              Latches actuation, then runs the declared safe-state hooks.
+            {:else if estop.software_safe_state === "setpoints"}
+              Latches actuation, then drives the declared safe setpoints.
+            {:else if estop.software_safe_state === "zero"}
+              The project declares zero_is_safe: latches actuation, then tries to drive every
+              actuating function to zero.
+            {:else}
+              No software safe-state is declared for this machine. The software stop drives nothing:
+              it only latches actuation (blocks new commands). Use the hardware emergency stop to
+              make the machine safe.
             {/if}
-          </div>
-        </div>
-      {/if}
-      {#if startupSafeState}
-        <!-- What safety.on_startup did when this runtime started (#483). The
-             verdict is the runtime's; a runtime older than 0.1.45 omits it. -->
-        {@const startup = summarizeStartupSafeState(startupSafeState)}
-        <div class={startup.ok ? "field-note" : "field-error"} data-testid="startup-safe-state">
-          {startup.text}
-        </div>
-      {/if}
-      {#if estopFeedback}
-        <div class={estopFeedbackClass}>{estopFeedback}</div>
-      {/if}
-      <div class="estop-disclaimer">
-        Not an emergency stop — it commands devices that stay powered, and needs the runtime,
-        providers and bus all working. For any physical hazard use the hardware emergency stop. If
-        in doubt, isolate power to the machine.
+            {@render safeStateFix()}
+          </InfoToggle>
+          {#if dispatchableCoverage}
+            <!-- The functions the active rung will not drive. Under none it
+                 drives nothing, which the state chip already says. -->
+            {#if estop.software_safe_state !== "none" && estop.uncovered_actuating_functions > 0}
+              <span class="estop-chip field-error" data-testid="estop-coverage">
+                ⚠ {estop.uncovered_actuating_functions} not covered
+              </span>
+              <InfoToggle label="About uncovered functions">
+                {estop.uncovered_actuating_functions} actuating function(s) the software stop will not
+                drive.
+              </InfoToggle>
+            {/if}
+          {:else if estop.software_safe_state === "none" && estop.uncovered_actuating_functions > 0}
+            <!-- An older runtime counts functions with no matching setpoint,
+                 which is only meaningful as the reason setpoints were not chosen. -->
+            <span class="estop-chip field-error" data-testid="estop-coverage">
+              ⚠ {estop.uncovered_actuating_functions} without a safe setpoint
+            </span>
+            <InfoToggle label="About uncovered functions">
+              {estop.uncovered_actuating_functions} actuating function(s) have no declared safe setpoint,
+              which is why setpoints are not used.
+            </InfoToggle>
+          {/if}
+        {/if}
+        {#if startupSafeState}
+          <!-- What safety.on_startup did when this runtime started (#483). The
+               verdict is the runtime's; Runtime Status always carries it, and
+               the row only when it was not achieved. -->
+          {@const startup = summarizeStartupSafeState(startupSafeState)}
+          {#if !startup.ok}
+            <span class="estop-chip field-error" data-testid="estop-startup">
+              ⚠ Startup safe state not achieved
+            </span>
+            <InfoToggle label="About the startup safe state">{startup.text}</InfoToggle>
+          {/if}
+        {/if}
+        {#if estopFeedback}
+          <span class={estopFeedbackClass} data-testid="estop-feedback">{estopFeedback}</span>
+        {/if}
+        <span class="estop-disclaimer">
+          Not an emergency stop: use the hardware E-stop
+          <InfoToggle label="Why this is not an emergency stop">
+            Not an emergency stop — it commands devices that stay powered, and needs the runtime,
+            providers and bus all working. For any physical hazard use the hardware emergency stop.
+            If in doubt, isolate power to the machine.
+          </InfoToggle>
+        </span>
       </div>
     </div>
 
@@ -1155,9 +1158,20 @@
           <span class="operate-meta">{health.reasons.join("; ")}.</span>
         {/if}
         <span class="operate-meta">
-          Mode {runtimeStatusData.mode} | Devices {runtimeStatusData.device_count} | Poll {runtimeStatusData.polling_interval_ms}ms
-          | Uptime {runtimeStatusData.uptime_seconds}s
+          {runtimeStatusData.version ? `Runtime v${runtimeStatusData.version} | ` : ""}Mode {runtimeStatusData.mode}
+          | Devices {runtimeStatusData.device_count} | Poll {runtimeStatusData.polling_interval_ms}ms
+          | Uptime
+          {runtimeStatusData.uptime_seconds}s
         </span>
+        {#if startupSafeState}
+          {@const startup = summarizeStartupSafeState(startupSafeState)}
+          <span
+            class="operate-meta {startup.ok ? 'field-note' : 'field-error'}"
+            data-testid="startup-safe-state"
+          >
+            {startup.text}
+          </span>
+        {/if}
       {:else}
         <span class="badge unavailable">UNAVAILABLE</span>
         <span class="operate-meta">Runtime status unavailable.</span>

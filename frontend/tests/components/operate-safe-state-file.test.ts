@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import Operate from '../../src/routes/Operate.svelte';
@@ -18,6 +18,8 @@ describe("Operate.svelte — the safe-state file is the project's own (#564)", (
     const system = createImportedDocument('rig-a');
     system.profile.runtime_profiles = { manual: 'config/anolis-runtime.bioreactor.manual.yaml' };
     render(Operate, { props: { projectName: 'rig-a', system, runtimeStatus: RUNNING } });
+    // The file is named behind the stop row's click-open detail (#613).
+    await fireEvent.click(await screen.findByRole('button', { name: 'About the software stop' }));
 
     expect(await screen.findByTestId('safe-state-fix')).toHaveTextContent(
       'config/anolis-runtime.bioreactor.manual.yaml',

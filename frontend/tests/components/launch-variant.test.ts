@@ -364,6 +364,8 @@ describe("App: the Compose selector and the launch variant (#339)", () => {
 
     await fireEvent.click(await screen.findByRole("button", { name: /Remove automation variant/ }));
     await tab("Operate");
+    // The file is named behind the stop row's click-open detail (#613).
+    await fireEvent.click(await screen.findByRole("button", { name: "About the software stop" }));
 
     expect(await screen.findByTestId("safe-state-fix")).toHaveTextContent(
       "config/anolis-runtime.automation.yaml",

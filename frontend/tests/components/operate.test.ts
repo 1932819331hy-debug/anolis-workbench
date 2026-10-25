@@ -42,11 +42,19 @@ function status(
   });
 }
 
+/** Open the stop row's click-open details (#613), once its state has rendered. */
+async function openStopDetails() {
+  await screen.findByTestId('estop-state');
+  await waitFor(() => expect(screen.getByTestId('estop-state')).not.toHaveTextContent('Loading'));
+  for (const button of screen.getAllByRole('button', { name: /^About / })) await fireEvent.click(button);
+}
+
 describe("Operate.svelte — the safe-state note (#346)", () => {
-  it('attributes the rung to the runtime version and names where to declare it', async () => {
+  it('names the runtime version in Runtime Status, and the rung and its file behind the ⓘ', async () => {
     renderOperate(status({ software_safe_state: 'setpoints', uncovered_actuating_functions: 0 }));
 
-    expect(await screen.findByText('As reported by runtime v0.1.44.')).toBeInTheDocument();
+    expect(await screen.findByText(/Runtime v0\.1\.44 \| Mode MANUAL/)).toBeInTheDocument();
+    await openStopDetails();
     expect(screen.getByText(/Latches actuation, then drives the declared safe setpoints/)).toBeInTheDocument();
     const fix = screen.getByTestId('safe-state-fix');
     expect(fix).toHaveTextContent('safety.safe_state');
@@ -59,6 +67,7 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
     system.variants.automation = structuredClone(system.variants.manual);
     system.launch = { variant: 'automation' };
     renderOperate(status({ software_safe_state: 'zero', uncovered_actuating_functions: 0 }), system);
+    await openStopDetails();
 
     expect(await screen.findByTestId('safe-state-fix')).toHaveTextContent(
       'config/anolis-runtime.automation.yaml',
@@ -71,11 +80,12 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
     it.each([
       ['hooks', 2],
       ['zero', 1],
-    ])('under %s, shows the %i actuating function(s) the e-stop will not drive', async (rung, n) => {
+    ])('under %s, shows the %i actuating function(s) the software stop will not drive', async (rung, n) => {
       renderOperate(status({ software_safe_state: rung, uncovered_actuating_functions: n }, NEW));
+      await openStopDetails();
 
       expect(
-        await screen.findByText(`${n} actuating function(s) the e-stop will not drive.`),
+        await screen.findByText(`${n} actuating function(s) the software stop will not drive.`),
       ).toBeInTheDocument();
     });
 
@@ -85,15 +95,17 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
       ['zero', /latches actuation, then tries to drive every actuating function to zero/],
     ])('under %s with 0 undriven, shows its note and no count line', async (rung, note) => {
       renderOperate(status({ software_safe_state: rung, uncovered_actuating_functions: 0 }, NEW));
+      await openStopDetails();
 
       expect(await screen.findByText(note)).toBeInTheDocument();
       expect(screen.queryByText(/actuating function\(s\)/)).not.toBeInTheDocument();
     });
 
-    it('under none, says the e-stop drives nothing and shows no count', async () => {
+    it('under none, says the software stop drives nothing and shows no count', async () => {
       renderOperate(status({ software_safe_state: 'none', uncovered_actuating_functions: 4 }, NEW));
+      await openStopDetails();
 
-      expect(await screen.findByText(/The e-stop drives nothing/)).toBeInTheDocument();
+      expect(await screen.findByText(/The software stop drives nothing/)).toBeInTheDocument();
       expect(screen.queryByText(/actuating function\(s\)/)).not.toBeInTheDocument();
     });
   });
@@ -108,31 +120,34 @@ describe("Operate.svelte — the safe-state note (#346)", () => {
       ['zero', 3],
     ])('under %s, shows no count line for %i', async (rung, n) => {
       renderOperate(status({ software_safe_state: rung, uncovered_actuating_functions: n }, version));
+      await openStopDetails();
 
-      expect(await screen.findByText(/^As reported by /)).toBeInTheDocument();
+      expect(screen.getByTestId('safe-state-fix')).toBeInTheDocument();
       expect(screen.queryByText(/actuating function\(s\)/)).not.toBeInTheDocument();
     });
 
     it('under none, shows the count as the reason setpoints are not used', async () => {
       renderOperate(status({ software_safe_state: 'none', uncovered_actuating_functions: 4 }, version));
+      await openStopDetails();
 
       expect(
         await screen.findByText(
           /4 actuating function\(s\) have no declared safe setpoint, which is why setpoints are not used/,
         ),
       ).toBeInTheDocument();
-      expect(screen.queryByText(/the e-stop will not drive/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/the software stop will not drive/)).not.toBeInTheDocument();
     });
   });
 
   it('says not observed when the runtime has not answered, and still names the file', async () => {
     renderOperate(jsonResponse(500, { error: 'runtime unreachable' }));
+    await openStopDetails();
 
     expect(
       await screen.findByText('Software safe-state: not observed. The runtime has not reported it.'),
     ).toBeInTheDocument();
     expect(screen.getByTestId('safe-state-fix')).toHaveTextContent('config/anolis-runtime.manual.yaml');
-    expect(screen.queryByText(/As reported by/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Runtime v/)).not.toBeInTheDocument();
   });
 });
 
@@ -282,7 +297,7 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
   it('shows nothing when the runtime does not report it', async () => {
     renderOperate(status(ESTOP, '0.1.44'));
 
-    await screen.findByText('As reported by runtime v0.1.44.');
+    await screen.findByText(/Runtime v0\.1\.44 \| Mode MANUAL/);
     expect(screen.queryByTestId('startup-safe-state')).not.toBeInTheDocument();
     expect(screen.queryByText(/startup/i)).not.toBeInTheDocument();
   });
@@ -563,7 +578,7 @@ describe('Operate.svelte — the software stop card shows one state (#553)', () 
 
     await fireEvent.click(await screen.findByRole('button', { name: 'SOFTWARE STOP' }));
 
-    expect(await screen.findByText('SAFE-STATE ENGAGED — actuation latched')).toBeInTheDocument();
+    expect(await screen.findByText(/^SAFE-STATE ENGAGED at /)).toBeInTheDocument();
     expect(screen.queryByText('ENGAGING…')).not.toBeInTheDocument();
   });
 
@@ -574,7 +589,7 @@ describe('Operate.svelte — the software stop card shows one state (#553)', () 
     await fireEvent.click(screen.getByRole('button', { name: /Confirm clear/ }));
 
     expect(await screen.findByText('Latch cleared. Actuation re-enabled.')).toBeInTheDocument();
-    expect(screen.queryByText('SAFE-STATE ENGAGED — actuation latched')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^SAFE-STATE ENGAGED at /)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'SOFTWARE STOP' })).toBeInTheDocument();
   });
 
@@ -616,10 +631,10 @@ describe('Operate.svelte — the software stop never disappears (#553)', () => {
     );
     render(Operate, { props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING } });
 
-    expect(screen.getByText("Software safe-state: loading the runtime's status…")).toBeInTheDocument();
+    expect(screen.getByTestId('estop-state')).toHaveTextContent('Loading safe state…');
     await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
 
-    expect(await screen.findByText('SAFE-STATE ENGAGED — actuation latched')).toBeInTheDocument();
+    expect(await screen.findByText(/^SAFE-STATE ENGAGED at /)).toBeInTheDocument();
   });
 
   it("drops another project's latch once its runtime reports it cleared, keeping the stop throughout", async () => {
@@ -688,7 +703,7 @@ describe('Operate.svelte — no runtime running for this project (#510)', () => 
 
 describe('Operate.svelte — a status reply older than the last stop or clear (#614)', () => {
   const ESTOP = { software_safe_state: 'zero', uncovered_actuating_functions: 0 };
-  const LATCHED = 'SAFE-STATE ENGAGED — actuation latched';
+  const LATCHED = /^SAFE-STATE ENGAGED at /;
 
   /** Each GET /v0/runtime/status waits on its own reply, in request order. */
   function renderWithHeldStatus(projectName = 'demo') {

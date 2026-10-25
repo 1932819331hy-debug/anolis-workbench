@@ -1432,6 +1432,42 @@ body {
   top: calc(var(--topbar-height) + 42px);
 }
 
+/* ─── Click-open detail (wb#613) ────────────────────────────────────────── */
+
+.info-toggle {
+  position: relative;
+  display: inline-flex;
+}
+.info-button {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.info-button[aria-expanded="true"] {
+  color: var(--accent);
+}
+.info-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 10;
+  width: max-content;
+  max-width: min(420px, 80vw);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 400;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.12);
+  white-space: normal;
+}
+
 /* ─── Software e-stop (wb#236) ──────────────────────────────────────────── */
 
 .operate-estop-section {
@@ -1443,9 +1479,30 @@ body {
 }
 .estop-row {
   display: flex;
-  align-items: flex-start;
-  gap: 14px;
+  align-items: center;
+  gap: 8px 14px;
   flex-wrap: wrap;
+}
+/* Latched, the same row turns red (wb#613). */
+.estop-row-latched {
+  border: 2px solid var(--state-fault);
+  background: var(--state-fault-bg);
+  color: var(--state-fault);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+}
+.estop-chip {
+  font-size: 13px;
+  font-weight: 600;
+}
+.estop-row .estop-disclaimer {
+  margin: 0 0 0 auto;
+}
+/* Its detail opens leftward: the disclaimer ends the row, so a panel
+   anchored on its left would run off the right edge. */
+.estop-row .estop-disclaimer .info-panel {
+  left: auto;
+  right: 0;
 }
 .btn-estop {
   padding: 12px 28px;
@@ -1465,12 +1522,6 @@ body {
   opacity: 0.65;
   cursor: not-allowed;
 }
-.estop-info {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 560px;
-}
 .estop-latched-banner {
   display: flex;
   flex-direction: column;
@@ -1487,10 +1538,6 @@ body {
 }
 .estop-latched-meta {
   font-size: 12px;
-}
-.estop-clear-row {
-  display: flex;
-  gap: 8px;
 }
 .estop-disclaimer {
   margin-top: 8px;
