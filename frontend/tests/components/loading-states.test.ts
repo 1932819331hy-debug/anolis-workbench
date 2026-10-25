@@ -63,4 +63,50 @@ describe('loading states are not empty states (#568)', () => {
     caps.resolve(jsonResponse(200, { capabilities: { signals: [], functions: [] } }));
     expect(await screen.findByText('No callable functions declared.')).toBeInTheDocument();
   });
+
+  // #623: the two #598 left out.
+  const RUNNING = { running: true, active_project: 'demo' };
+
+  function renderHeld(held: Record<string, Promise<Response>>) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = pathFromInput(input);
+        if (path === '/api/status') return jsonResponse(200, RUNNING);
+        if (path in held) return held[path];
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, {
+      props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING },
+    });
+  }
+
+  it('Operate says runtime status is loading until it answers, and unavailable once it fails', async () => {
+    const status = deferred<Response>();
+    renderHeld({ '/v0/runtime/status': status.promise });
+
+    expect(await screen.findByText('Loading runtime status…')).toBeInTheDocument();
+    expect(screen.queryByText('Runtime status unavailable.')).not.toBeInTheDocument();
+    expect(screen.queryByText('UNAVAILABLE')).not.toBeInTheDocument();
+
+    status.resolve(jsonResponse(500, { error: 'runtime unreachable' }));
+    expect(await screen.findByText('Runtime status unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('Loading runtime status…')).not.toBeInTheDocument();
+  });
+
+  it("Operate says a device's signals are loading until its first read answers", async () => {
+    const state = deferred<Response>();
+    renderHeld({
+      '/v0/devices': Promise.resolve(jsonResponse(200, { devices: [{ provider_id: 'sim0', device_id: 'dev0' }] })),
+      '/v0/state/sim0/dev0': state.promise,
+    });
+
+    expect(await screen.findByText('Loading signals…')).toBeInTheDocument();
+    expect(screen.queryByText('No signals available.')).not.toBeInTheDocument();
+
+    state.resolve(jsonResponse(200, { values: [] }));
+    expect(await screen.findByText('No signals available.')).toBeInTheDocument();
+    expect(screen.queryByText('Loading signals…')).not.toBeInTheDocument();
+  });
 });

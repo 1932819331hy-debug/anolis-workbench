@@ -1187,6 +1187,11 @@
             {startup.text}
           </span>
         {/if}
+      {:else if !statusSettled}
+        <!-- Until the first status reply settles, a missing status is not a
+             fault (wb#623). A failed reply settles too, and falls through. -->
+        <span class="badge unknown">--</span>
+        <span class="operate-meta">Loading runtime status…</span>
       {:else}
         <span class="badge unavailable">UNAVAILABLE</span>
         <span class="operate-meta">Runtime status unavailable.</span>
@@ -1279,10 +1284,14 @@
           <p class="placeholder">Select a device to inspect signals and execute functions.</p>
         {:else}
           {@const signals = deviceStates[selectedKey] ?? []}
+          <!-- The first state read, or a failed one, files an entry (wb#623). -->
+          {@const signalsLoaded = deviceStates[selectedKey] !== undefined}
           {@const capsLoaded = capabilities[selectedKey] !== undefined}
           {@const caps = capabilities[selectedKey] ?? { functions: [] }}
 
-          {#if signals.length === 0}
+          {#if !signalsLoaded}
+            <p class="placeholder">Loading signals…</p>
+          {:else if signals.length === 0}
             <p class="placeholder">No signals available.</p>
           {:else}
             <table class="signal-table">
