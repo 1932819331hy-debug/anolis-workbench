@@ -196,7 +196,7 @@
     <label>
       <input
         type="checkbox"
-        checked={value === true}
+        checked={value === true || (value === undefined && schema.default === true)}
         onchange={(e: Event) => commit(inputTarget(e).checked)}
       />
       {label}

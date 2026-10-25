@@ -1,11 +1,11 @@
 {
   "schema_version": 3,
   "kind": "bread",
-  "provider_version": "0.8.1",
+  "provider_version": "0.9.0",
   "source": {
     "repo": "anolishq/anolis-provider-bread",
-    "path": "anolis-provider-bread-0.8.1-config-schema.json",
-    "tag": "v0.8.1"
+    "path": "anolis-provider-bread-0.9.0-config-schema.json",
+    "tag": "v0.9.0"
   },
   "distribution": {
     "mode": "release-artifact",
@@ -16,12 +16,12 @@
     },
     "release": {
       "repo": "anolishq/anolis-provider-bread",
-      "tag": "v0.8.1",
-      "asset": "anolis-provider-bread-0.8.1-config-schema.json",
-      "manifest_asset": "anolis-provider-bread-0.8.1-config-schema-manifest.json"
+      "tag": "v0.9.0",
+      "asset": "anolis-provider-bread-0.9.0-config-schema.json",
+      "manifest_asset": "anolis-provider-bread-0.9.0-config-schema-manifest.json"
     },
-    "schema_sha256": "80ecc2acc060344408101547764ef7250a4dc30e9e105316066f277f10ccf6a5",
-    "asset_sha256": "80ecc2acc060344408101547764ef7250a4dc30e9e105316066f277f10ccf6a5"
+    "schema_sha256": "de0835c13fa4c88b1d014afa40670c7b230ad96f4f4b6206fcf506f415ff7b6c",
+    "asset_sha256": "de0835c13fa4c88b1d014afa40670c7b230ad96f4f4b6206fcf506f415ff7b6c"
   },
-  "synced_at_utc": "2026-10-25T00:30:41Z"
+  "synced_at_utc": "2026-10-25T10:40:59Z"
 }

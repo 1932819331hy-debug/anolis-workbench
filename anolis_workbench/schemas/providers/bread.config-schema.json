@@ -1,7 +1,7 @@
 {
   "config_schema_version": 1,
   "provider": "anolis-provider-bread",
-  "provider_version": "0.8.1",
+  "provider_version": "0.9.0",
   "schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -205,6 +205,12 @@
               "minimum": 0,
               "maximum": 65535,
               "default": 0
+            },
+            "encoders": {
+              "type": "boolean",
+              "title": "Encoders fitted",
+              "description": "DCMT only. false when the motors have no encoders: the closed-loop modes, set_setpoint and the PID tuning functions are left out for this device, since the firmware advertises them either way.",
+              "default": true
             }
           },
           "required": [

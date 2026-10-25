@@ -131,6 +131,32 @@ describe("SchemaForm.svelte (bread envelope)", () => {
     expect(within(group).queryByText(/Required/)).not.toBeInTheDocument();
   });
 
+  it("offers bread 0.9.0's encoders flag on a DCMT row, absent reading as its default (bread#179)", async () => {
+    // An existing config has no `encoders` key, which bread reads as true.
+    const config = breadConfig();
+    config.devices = [{ id: "dcmt0", type: "dcmt", address: "0x14" }];
+    const onChanged = vi.fn();
+    render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged } });
+
+    const encoders = screen.getByRole("checkbox", { name: /Encoders fitted/ });
+    expect(encoders).toBeChecked();
+    expect("encoders" in (config.devices as UnknownRecord[])[0]).toBe(false);
+
+    await fireEvent.click(encoders);
+
+    expect(onChanged).toHaveBeenCalled();
+    expect((config.devices as UnknownRecord[])[0].encoders).toBe(false);
+    expect(encoders).not.toBeChecked();
+  });
+
+  it("shows an explicit encoders: false unchecked", () => {
+    const config = breadConfig();
+    config.devices = [{ id: "dcmt0", type: "dcmt", address: "0x14", encoders: false }];
+    render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged: vi.fn() } });
+
+    expect(screen.getByRole("checkbox", { name: /Encoders fitted/ })).not.toBeChecked();
+  });
+
   it("flags duplicate addresses across representations (uniqueViolations)", () => {
     const config = breadConfig();
     (config.devices as UnknownRecord[]).push({ id: "dcmt0", type: "dcmt", address: 10 });
