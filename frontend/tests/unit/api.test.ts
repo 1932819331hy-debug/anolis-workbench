@@ -93,6 +93,16 @@ describe("fetchJson", () => {
     await expect(fetchJson("/api/projects/x")).rejects.toThrow("HTTP 500: plain failure");
   });
 
+  // The runtime's error body is {"status": {"code", "message"}} (#580).
+  it("surfaces the runtime's status.message for non-2xx responses without an error field", async () => {
+    mockFetch({
+      ok: false,
+      status: 409,
+      body: JSON.stringify({ status: { code: "FAILED_PRECONDITION", message: "Actuation latched by e-stop" } }),
+    });
+    await expect(fetchJson("/v0/call")).rejects.toThrow("Actuation latched by e-stop");
+  });
+
   it("falls back to status code when non-2xx response body is empty", async () => {
     mockFetch({ ok: false, status: 503, body: "" });
     await expect(fetchJson("/api/projects/x")).rejects.toThrow("HTTP 503");

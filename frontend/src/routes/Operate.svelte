@@ -548,10 +548,11 @@
           args: argsPayload,
         }),
       });
-      functionFeedback = { ...functionFeedback, [fbKey]: { text: "Success", cls: "success" } };
-      setTimeout(() => {
-        functionFeedback = { ...functionFeedback, [fbKey]: { text: "", cls: "" } };
-      }, 2500);
+      // The result stays beside its form until the next call (#580).
+      functionFeedback = {
+        ...functionFeedback,
+        [fbKey]: { text: `Accepted at ${new Date().toLocaleTimeString()}`, cls: "success" },
+      };
     } catch (err) {
       functionFeedback = {
         ...functionFeedback,
@@ -817,6 +818,27 @@
 
   // Function form state keyed by deviceKey:functionId
   let funcFormData = $state<Record<string, Record<string, unknown>>>({});
+
+  // When the software stop latches, clear the forms of actuating functions,
+  // so one Execute after the clear cannot resend the last values (#580). The
+  // runtime's `actuating` flag decides: it is true unless the category is
+  // READ, so CONFIG counts too, which it must, since bread's setpoints are
+  // CONFIG. Only a form marked actuating: false keeps its values; a missing
+  // flag counts as actuating.
+  let wasLatched = false;
+  $effect(() => {
+    const latched = estop?.latched === true;
+    if (latched && !wasLatched) {
+      const next = { ...funcFormData };
+      for (const [deviceKey, caps] of Object.entries(capabilities)) {
+        for (const func of caps.functions ?? []) {
+          if (func.actuating !== false) delete next[getFuncFormKey(deviceKey, func)];
+        }
+      }
+      funcFormData = next;
+    }
+    wasLatched = latched;
+  });
   function getFuncFormKey(deviceKey: string, func: FunctionSpec): string {
     return `${deviceKey}:${func.function_id}`;
   }

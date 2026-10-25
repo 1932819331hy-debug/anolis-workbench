@@ -31,10 +31,16 @@ export async function fetchJson<T = unknown>(path: string, options: RequestInit 
   }
   if (!response.ok) {
     const errObj = data && typeof data === "object" ? (data as Record<string, unknown>) : null;
+    // The workbench's own routes answer {"error": ...}; the runtime answers
+    // {"status": {"code", "message"}} (#580), so its reason is read too.
+    const status = errObj?.status && typeof errObj.status === "object" ? errObj.status : null;
+    const runtimeMessage = (status as Record<string, unknown> | null)?.message;
     const message =
       typeof errObj?.error === "string" && errObj.error.trim() !== ""
         ? errObj.error
-        : `HTTP ${response.status}`;
+        : typeof runtimeMessage === "string" && runtimeMessage.trim() !== ""
+          ? runtimeMessage
+          : `HTTP ${response.status}`;
     throw new ApiResponseError(message, response.status, data);
   }
   return data as T;
