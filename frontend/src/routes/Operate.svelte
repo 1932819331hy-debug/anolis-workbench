@@ -112,6 +112,10 @@
 
   // ── E-stop state (wb#236) ───────────────────────────────────────────────────
   let estop = $state<EstopStatus | null>(null);
+  // Bumped when a stop or clear reply sets the latch. A status reply whose
+  // request left before then describes the runtime before that POST, so it
+  // never overwrites what the reply reported (wb#614).
+  let estopEpoch = 0;
   // Whether a status poll has settled yet: until it has, the stop card says it is
   // loading rather than that the runtime has not reported its safe state.
   let statusSettled = $state<boolean>(false);
@@ -195,9 +199,11 @@
     const target = runningProject;
     estop = null;
     const read = (): void => {
+      const epoch = estopEpoch;
       void fetchJson<UnknownRecord>("/v0/runtime/status")
         .then((p) => {
-          if (otherLatchTimer === timer && runningProject === target) estop = extractEstopStatus(p);
+          if (otherLatchTimer === timer && runningProject === target && epoch === estopEpoch)
+            estop = extractEstopStatus(p);
         })
         .catch(() => {});
     };
@@ -313,6 +319,7 @@
     ensureEventStream();
     ensureTelemetryLoaded();
 
+    const epoch = estopEpoch;
     const [modeRes, phRes, devRes, rtRes, parRes, asRes, atRes] = await Promise.allSettled([
       fetchJson<UnknownRecord>("/v0/mode"),
       fetchJson<UnknownRecord>("/v0/providers/health"),
@@ -348,8 +355,10 @@
 
     runtimeStatusData = rtRes.status === "fulfilled" ? extractRuntimeStatus(rtRes.value) : null;
     // Keep the last-known estop state on a transient status-poll failure so the
-    // safety control never disappears mid-session (wb#236).
-    estop = rtRes.status === "fulfilled" ? extractEstopStatus(rtRes.value) : estop;
+    // safety control never disappears mid-session (wb#236), and the state a
+    // stop or clear reply reported since this poll left (wb#614).
+    if (rtRes.status === "fulfilled" && epoch === estopEpoch)
+      estop = extractEstopStatus(rtRes.value);
     statusSettled = true;
     startupSafeState =
       rtRes.status === "fulfilled" ? extractStartupSafeState(rtRes.value) : startupSafeState;
@@ -452,9 +461,10 @@
 
   // ── Software e-stop (wb#236) — thin trigger over POST /v0/estop ─────────────
   async function refreshEstopOnly(): Promise<void> {
+    const epoch = estopEpoch;
     try {
       const p = await fetchJson<UnknownRecord>("/v0/runtime/status");
-      estop = extractEstopStatus(p);
+      if (epoch === estopEpoch) estop = extractEstopStatus(p);
     } catch {
       // Best-effort; the 5s status poll corrects the display shortly.
     }
@@ -473,6 +483,7 @@
       // Show the latch the reply reports now; the status read after it only
       // fills in the latch time (wb#553).
       if (res.latched === true) {
+        estopEpoch += 1;
         estop = estop
           ? { ...estop, latched: true }
           : extractEstopStatus({
@@ -511,6 +522,7 @@
       } else {
         estopFeedback = "Latch cleared. Actuation re-enabled.";
         estopFeedbackClass = "field-note";
+        estopEpoch += 1;
         if (estop) estop = { ...estop, latched: false, latched_at_epoch_ms: null };
       }
       clearRunning = false;

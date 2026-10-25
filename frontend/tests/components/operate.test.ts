@@ -685,3 +685,116 @@ describe('Operate.svelte — no runtime running for this project (#510)', () => 
     expect(screen.queryByTestId('operate-remote-routes')).not.toBeInTheDocument();
   });
 });
+
+describe('Operate.svelte — a status reply older than the last stop or clear (#614)', () => {
+  const ESTOP = { software_safe_state: 'zero', uncovered_actuating_functions: 0 };
+  const LATCHED = 'SAFE-STATE ENGAGED — actuation latched';
+
+  /** Each GET /v0/runtime/status waits on its own reply, in request order. */
+  function renderWithHeldStatus(projectName = 'demo') {
+    const reads: Array<ReturnType<typeof deferred<Response>>> = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = pathFromInput(input);
+        if (path === '/api/status') return jsonResponse(200, RUNNING);
+        if (init?.method === 'POST' && path === '/v0/estop')
+          return jsonResponse(200, { latched: true, software_safe_state: 'zero', actions: [] });
+        if (init?.method === 'POST' && path === '/v0/estop/clear') return jsonResponse(200, { latched: false });
+        if (path === '/v0/runtime/status') {
+          const read = deferred<Response>();
+          reads.push(read);
+          return read.promise;
+        }
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, {
+      props: { projectName, system: createProjectDocument(projectName), runtimeStatus: RUNNING },
+    });
+    return reads;
+  }
+
+  /** Let a resolved reply run through the page's promise chain. */
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  it('keeps the latch the stop reply reported when an older poll reply says unlatched', async () => {
+    const reads = renderWithHeldStatus();
+    await waitFor(() => expect(reads).toHaveLength(1));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
+    expect(await screen.findByText(LATCHED)).toBeInTheDocument();
+    await waitFor(() => expect(reads).toHaveLength(2));
+
+    reads[0].resolve(status({ ...ESTOP, latched: false }, '0.1.44', { uptime_seconds: 4242 }));
+    expect(await screen.findByText(/Uptime 4242s/)).toBeInTheDocument();
+
+    expect(screen.getByText(LATCHED)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear latch…' })).toBeInTheDocument();
+  });
+
+  it('takes a reply whose request left after the stop reply', async () => {
+    const reads = renderWithHeldStatus();
+    await waitFor(() => expect(reads).toHaveLength(1));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
+    await waitFor(() => expect(reads).toHaveLength(2));
+
+    reads[1].resolve(status({ ...ESTOP, latched: false }));
+    await settle();
+
+    expect(screen.queryByText(LATCHED)).not.toBeInTheDocument();
+  });
+
+  it('keeps the release the clear reply reported when an older poll reply says latched', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const reads = renderWithHeldStatus();
+    await waitFor(() => expect(reads).toHaveLength(1));
+    reads[0].resolve(status({ ...ESTOP, latched: true, latched_at_epoch_ms: 1 }));
+    expect(await screen.findByText(LATCHED)).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await waitFor(() => expect(reads).toHaveLength(2));
+    await fireEvent.click(screen.getByRole('button', { name: 'Clear latch…' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Confirm clear/ }));
+    expect(await screen.findByText('Latch cleared. Actuation re-enabled.')).toBeInTheDocument();
+    await waitFor(() => expect(reads).toHaveLength(3));
+
+    reads[1].resolve(status({ ...ESTOP, latched: true, latched_at_epoch_ms: 1 }, '0.1.44', { uptime_seconds: 4242 }));
+    expect(await screen.findByText(/Uptime 4242s/)).toBeInTheDocument();
+
+    expect(screen.queryByText(LATCHED)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SOFTWARE STOP' })).toBeInTheDocument();
+  });
+
+  it("keeps the release when the read after the stop lands after the clear's reply", async () => {
+    const reads = renderWithHeldStatus();
+    await waitFor(() => expect(reads).toHaveLength(1));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
+    await waitFor(() => expect(reads).toHaveLength(2));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Clear latch…' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Confirm clear/ }));
+    expect(await screen.findByText('Latch cleared. Actuation re-enabled.')).toBeInTheDocument();
+    await waitFor(() => expect(reads).toHaveLength(3));
+
+    reads[1].resolve(status({ ...ESTOP, latched: true, latched_at_epoch_ms: 1 }));
+    await settle();
+
+    expect(screen.queryByText(LATCHED)).not.toBeInTheDocument();
+  });
+
+  it("keeps another project's latch the stop reply reported when an older read says unlatched", async () => {
+    const reads = renderWithHeldStatus('other');
+    await waitFor(() => expect(reads).toHaveLength(1));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Software stop: demo' }));
+    expect(await screen.findByTestId('other-project-latch')).toBeInTheDocument();
+    await waitFor(() => expect(reads).toHaveLength(2));
+
+    reads[0].resolve(status({ ...ESTOP, latched: false }));
+    await settle();
+
+    expect(screen.getByTestId('other-project-latch')).toBeInTheDocument();
+  });
+});
