@@ -1404,6 +1404,10 @@ body {
 
 .operate-estop-section {
   border-color: #fca5a5;
+  /* Operate is thousands of pixels tall: keep the stop in view (wb#553). */
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 .estop-row {
   display: flex;

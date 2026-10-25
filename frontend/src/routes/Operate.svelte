@@ -60,12 +60,15 @@
     runtimeStatus,
     editingVariant = "",
     saved = null,
+    onNavigate = undefined,
   }: {
     projectName: string | null;
     system?: ProjectDoc | null;
     runtimeStatus: RuntimeStatus | null;
     /** The variant open in Compose, for the mismatch banner. */
     editingVariant?: string;
+    /** Opens a workbench route, e.g. the running project's Operate view. */
+    onNavigate?: (path: string) => void;
     /** The saved project's launch state, shared with Commission. */
     saved?: SavedLaunch | null;
   } = $props();
@@ -104,6 +107,9 @@
 
   // ── E-stop state (wb#236) ───────────────────────────────────────────────────
   let estop = $state<EstopStatus | null>(null);
+  // Whether a status poll has settled yet: until it has, the stop card says it is
+  // loading rather than that the runtime has not reported its safe state.
+  let statusSettled = $state<boolean>(false);
   let startupSafeState = $state<StartupSafeStateStatus | null>(null);
   let estopRunning = $state<boolean>(false);
   let clearRunning = $state<boolean>(false);
@@ -172,6 +178,30 @@
   // The advisory's stop label depends on whether /v0 goes to an override.
   void loadWorkbenchConfig();
 
+  // On another project's page the Operate poll is off, so read the running
+  // runtime's latch on the same 5 s cadence while the page shows it (wb#553).
+  // A reply that lands after the page moved on writes nothing, as in #551.
+  let otherLatchTimer: ReturnType<typeof setInterval> | null = null;
+  $effect(() => {
+    if (available || !running || !runningProject) return;
+    const target = runningProject;
+    estop = null;
+    const read = (): void => {
+      void fetchJson<UnknownRecord>("/v0/runtime/status")
+        .then((p) => {
+          if (otherLatchTimer === timer && runningProject === target) estop = extractEstopStatus(p);
+        })
+        .catch(() => {});
+    };
+    const timer = setInterval(read, 5000);
+    otherLatchTimer = timer;
+    read();
+    return () => {
+      clearInterval(timer);
+      if (otherLatchTimer === timer) otherLatchTimer = null;
+    };
+  });
+
   // The "confirm clear" arm is scoped to a single latched episode: any time the
   // latch is not engaged (cleared here, by another client, or before a fresh
   // e-stop), disarm so a new latch can never reappear already in the confirm
@@ -202,6 +232,7 @@
   }
 
   function clearOperateData(): void {
+    statusSettled = false;
     devices = [];
     selectedKey = "";
     deviceStates = {};
@@ -309,6 +340,7 @@
     // Keep the last-known estop state on a transient status-poll failure so the
     // safety control never disappears mid-session (wb#236).
     estop = rtRes.status === "fulfilled" ? extractEstopStatus(rtRes.value) : estop;
+    statusSettled = true;
     startupSafeState =
       rtRes.status === "fulfilled" ? extractStartupSafeState(rtRes.value) : startupSafeState;
     parameters = parRes.status === "fulfilled" ? extractParameters(parRes.value) : [];
@@ -428,7 +460,21 @@
       const summary = summarizeEstopResponse(res);
       estopFeedback = summary.text;
       estopFeedbackClass = summary.ok ? "field-note" : "field-error";
-      await refreshEstopOnly();
+      // Show the latch the reply reports now; the status read after it only
+      // fills in the latch time (wb#553).
+      if (res.latched === true) {
+        estop = estop
+          ? { ...estop, latched: true }
+          : extractEstopStatus({
+              estop: {
+                latched: true,
+                software_safe_state: res.software_safe_state,
+                latched_at_epoch_ms: null,
+              },
+            });
+      }
+      estopRunning = false;
+      void refreshEstopOnly();
     } catch (err) {
       estopFeedback = `Failed to engage software stop: ${err instanceof Error ? err.message : String(err)}. If the machine is not safe, use the hardware e-stop now.`;
       estopFeedbackClass = "field-error";
@@ -455,8 +501,11 @@
       } else {
         estopFeedback = "Latch cleared. Actuation re-enabled.";
         estopFeedbackClass = "field-note";
+        if (estop) estop = { ...estop, latched: false, latched_at_epoch_ms: null };
       }
-      await refreshEstopOnly();
+      clearRunning = false;
+      clearArmed = false;
+      void refreshEstopOnly();
     } catch (err) {
       estopFeedback = `Failed to clear latch: ${err instanceof Error ? err.message : String(err)}`;
       estopFeedbackClass = "field-error";
@@ -806,6 +855,25 @@
         <!-- The /v0 proxy targets the running project's runtime, so its stop
              stays reachable here (#264). Clearing the latch belongs to that
              project's own Operate view. -->
+        <!-- The stop stays offered whatever the latch reads: stopping a latched
+             runtime is harmless, and a stale read must never hide it (wb#553). -->
+        {#if estop?.latched}
+          <div class="estop-latched-banner" data-testid="other-project-latch">
+            <span class="estop-latched-title">SAFE-STATE ENGAGED — actuation latched</span>
+            <span class="estop-latched-meta">
+              Latched at {formatEpochMs(estop.latched_at_epoch_ms)} on the runtime running "{runningProject}".
+              Clear it from
+              <a
+                href={`/projects/${encodeURIComponent(runningProject)}/operate`}
+                onclick={(e: MouseEvent) => {
+                  if (!onNavigate) return;
+                  e.preventDefault();
+                  onNavigate(`/projects/${encodeURIComponent(runningProject)}/operate`);
+                }}>{runningProject}'s Operate view</a
+              >.
+            </span>
+          </div>
+        {/if}
         <div class="estop-row">
           <button type="button" class="btn-estop" disabled={estopRunning} onclick={triggerEstop}>
             {estopRunning
@@ -851,10 +919,22 @@
     <div class="operate-section operate-estop-section">
       <h3>Software Stop</h3>
       {#if !estop}
-        <p class="placeholder">
-          Software safe-state: not observed. The runtime has not reported it.
-        </p>
-        {@render safeStateFix()}
+        <!-- POST /v0/estop needs no prior status, so the stop is offered before
+             the first status reply and when the runtime never reports its rung
+             (wb#553). -->
+        <div class="estop-row">
+          <button type="button" class="btn-estop" disabled={estopRunning} onclick={triggerEstop}>
+            {estopRunning ? "ENGAGING…" : "SOFTWARE STOP"}
+          </button>
+          <div class="estop-info">
+            <p class="placeholder">
+              {statusSettled
+                ? "Software safe-state: not observed. The runtime has not reported it."
+                : "Software safe-state: loading the runtime's status…"}
+            </p>
+            {@render safeStateFix()}
+          </div>
+        </div>
       {:else if estop.latched}
         <div class="estop-latched-banner">
           <span class="estop-latched-title">SAFE-STATE ENGAGED — actuation latched</span>

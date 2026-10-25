@@ -291,15 +291,24 @@ describe("Operate.svelte — the startup safe state (#483)", () => {
 describe("Operate.svelte — another project's runtime is running (#264)", () => {
   function renderForOtherProject(config: Record<string, unknown> = {}) {
     const posts: string[] = [];
+    // The running runtime latches when the stop is pressed, not before.
+    const runtime = { latched: false };
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = pathFromInput(input);
         if (init?.method === 'POST') posts.push(path);
-        if (path === '/v0/estop')
+        if (path === '/v0/estop') {
+          runtime.latched = true;
           return jsonResponse(200, { latched: true, software_safe_state: 'zero', actions: [] });
+        }
         if (path === '/v0/runtime/status')
-          return status({ latched: true, software_safe_state: 'zero', uncovered_actuating_functions: 0 });
+          return status({
+            latched: runtime.latched,
+            latched_at_epoch_ms: runtime.latched ? 1 : null,
+            software_safe_state: 'zero',
+            uncovered_actuating_functions: 0,
+          });
         if (path === '/api/config') return jsonResponse(200, config);
         return jsonResponse(200, {});
       }),
@@ -311,7 +320,7 @@ describe("Operate.svelte — another project's runtime is running (#264)", () =>
         runtimeStatus: RUNNING,
       },
     });
-    return { posts, view };
+    return { posts, view, runtime };
   }
 
   it("offers a software stop labelled with the running project, which latches that runtime", async () => {
@@ -342,10 +351,12 @@ describe("Operate.svelte — another project's runtime is running (#264)", () =>
   });
 
   it("does not show one project's stop result under another project's name", async () => {
-    const { view } = renderForOtherProject();
+    const { view, runtime } = renderForOtherProject();
     await fireEvent.click(screen.getByRole('button', { name: 'Software stop: demo' }));
     await screen.findByText(/Software stop engaged \(zero\)/);
 
+    // foo's runtime is a different one, and it is not latched.
+    runtime.latched = false;
     await view.rerender({ runtimeStatus: { running: true, active_project: 'foo' } });
 
     expect(await screen.findByRole('button', { name: 'Software stop: foo' })).toBeInTheDocument();
@@ -517,6 +528,126 @@ describe('Operate.svelte — the /v0/events stream across mounts (#551)', () => 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(open()).toBe(1);
+  });
+});
+
+describe('Operate.svelte — the software stop card shows one state (#553)', () => {
+  const ESTOP = { software_safe_state: 'zero', uncovered_actuating_functions: 0 };
+
+  /** Status answers `first` until a stop or clear is posted, then hangs. */
+  function renderWithSlowStatusAfterAction(first: Record<string, unknown>) {
+    let acted = false;
+    const slow = deferred<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = pathFromInput(input);
+        if (path === '/api/status') return jsonResponse(200, RUNNING);
+        if (init?.method === 'POST' && path === '/v0/estop') {
+          acted = true;
+          return jsonResponse(200, { latched: true, software_safe_state: 'zero', actions: [] });
+        }
+        if (init?.method === 'POST' && path === '/v0/estop/clear') {
+          acted = true;
+          return jsonResponse(200, { latched: false });
+        }
+        if (path === '/v0/runtime/status') return acted ? slow.promise : status(first);
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, { props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING } });
+  }
+
+  it('shows the latch as soon as the stop reply reports it, without waiting for status', async () => {
+    renderWithSlowStatusAfterAction({ ...ESTOP, latched: false });
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'SOFTWARE STOP' }));
+
+    expect(await screen.findByText('SAFE-STATE ENGAGED — actuation latched')).toBeInTheDocument();
+    expect(screen.queryByText('ENGAGING…')).not.toBeInTheDocument();
+  });
+
+  it('drops the latched box as soon as the clear reply reports it released', async () => {
+    renderWithSlowStatusAfterAction({ ...ESTOP, latched: true, latched_at_epoch_ms: 1 });
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Clear latch…' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Confirm clear/ }));
+
+    expect(await screen.findByText('Latch cleared. Actuation re-enabled.')).toBeInTheDocument();
+    expect(screen.queryByText('SAFE-STATE ENGAGED — actuation latched')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'SOFTWARE STOP' })).toBeInTheDocument();
+  });
+
+  it("shows another project's latch and links to that project's Operate view, with no clear here", async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (pathFromInput(input) === '/v0/runtime/status')
+          return status({ ...ESTOP, latched: true, latched_at_epoch_ms: 1 });
+        return jsonResponse(200, {});
+      }),
+    );
+    const onNavigate = vi.fn();
+    render(Operate, {
+      props: { projectName: 'other', system: createProjectDocument('other'), runtimeStatus: RUNNING, onNavigate },
+    });
+
+    const latch = await screen.findByTestId('other-project-latch');
+    expect(latch).toHaveTextContent('SAFE-STATE ENGAGED — actuation latched');
+    expect(screen.queryByRole('button', { name: /Clear latch/ })).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('link', { name: "demo's Operate view" }));
+    expect(onNavigate).toHaveBeenCalledWith('/projects/demo/operate');
+  });
+});
+
+describe('Operate.svelte — the software stop never disappears (#553)', () => {
+  it('offers the stop before status answers, and shows the latch from its reply', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = pathFromInput(input);
+        if (path === '/api/status') return jsonResponse(200, RUNNING);
+        if (init?.method === 'POST' && path === '/v0/estop')
+          return jsonResponse(200, { latched: true, software_safe_state: 'zero', actions: [] });
+        if (path === '/v0/runtime/status') return new Promise<Response>(() => {});
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, { props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING } });
+
+    expect(screen.getByText("Software safe-state: loading the runtime's status…")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
+
+    expect(await screen.findByText('SAFE-STATE ENGAGED — actuation latched')).toBeInTheDocument();
+  });
+
+  it("drops another project's latch once its runtime reports it cleared, keeping the stop throughout", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const runtime = { latched: true };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (pathFromInput(input) === '/v0/runtime/status')
+          return status({
+            software_safe_state: 'zero',
+            uncovered_actuating_functions: 0,
+            latched: runtime.latched,
+            latched_at_epoch_ms: runtime.latched ? 1 : null,
+          });
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, { props: { projectName: 'other', system: createProjectDocument('other'), runtimeStatus: RUNNING } });
+
+    expect(await screen.findByTestId('other-project-latch')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Software stop: demo' })).toBeInTheDocument();
+
+    runtime.latched = false;
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await waitFor(() => expect(screen.queryByTestId('other-project-latch')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Software stop: demo' })).toBeInTheDocument();
   });
 });
 

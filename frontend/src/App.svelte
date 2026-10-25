@@ -403,7 +403,14 @@
       />
     {/key}
   {:else if workspace === "operate"}
-    <Operate {projectName} {system} {runtimeStatus} {editingVariant} {saved} />
+    <Operate
+      {projectName}
+      {system}
+      {runtimeStatus}
+      {editingVariant}
+      {saved}
+      onNavigate={(path) => void navigateTo(path)}
+    />
   {/if}
 </main>
 
