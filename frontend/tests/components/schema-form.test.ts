@@ -204,7 +204,8 @@ describe("SchemaForm.svelte (sim envelope)", () => {
 
     const tick = screen.getByPlaceholderText("10");
     expect(tick).toHaveValue(null);
-    expect(screen.getAllByText("Required").length).toBeGreaterThan(0);
+    // Required, but not reported as an error before the field is touched (#578).
+    expect(tick).toHaveAttribute("aria-required", "true");
   });
 
   it("explains a conditionally required scalar beside it, and only while empty", async () => {
@@ -226,6 +227,81 @@ describe("SchemaForm.svelte (sim envelope)", () => {
     await waitFor(() => {
       expect(screen.queryByText(hint)).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("SchemaForm — form details (#578)", () => {
+  function hardwareWithoutBus(): UnknownRecord {
+    const config = breadConfig();
+    delete (config.hardware as UnknownRecord).bus_path;
+    return config;
+  }
+  const busInput = () => screen.getByPlaceholderText("/dev/i2c-1 or mock://name");
+
+  it("shows no Required line or invalid state on an untouched empty required field", () => {
+    render(SchemaForm, { props: { schema: breadSchema, value: hardwareWithoutBus(), onChanged: vi.fn() } });
+
+    expect(busInput()).toHaveAttribute("aria-required", "true");
+    expect(busInput()).not.toHaveAttribute("aria-invalid");
+    expect(screen.queryByText("Required")).not.toBeInTheDocument();
+  });
+
+  it("shows the Required line and invalid state once the empty field is left", async () => {
+    render(SchemaForm, { props: { schema: breadSchema, value: hardwareWithoutBus(), onChanged: vi.fn() } });
+
+    await fireEvent.focus(busInput());
+    await fireEvent.blur(busInput());
+
+    expect(await screen.findByText("Required")).toBeInTheDocument();
+    expect(busInput()).toHaveAttribute("aria-invalid", "true");
+  });
+
+  async function addDevice(config: UnknownRecord): Promise<UnknownRecord> {
+    // The last "+ Add" is the devices array, as in the add/remove test above.
+    const addButtons = screen.getAllByRole("button", { name: "+ Add" });
+    await fireEvent.click(addButtons[addButtons.length - 1]);
+    const devices = config.devices as UnknownRecord[];
+    return devices[devices.length - 1];
+  }
+  const lastTypeSelect = () => {
+    const selects = screen
+      .getAllByRole("combobox")
+      .filter((el) => el.querySelectorAll("option[value=dcmt]").length === 1);
+    return selects[selects.length - 1];
+  };
+
+  it("lets a generated device id follow the type", async () => {
+    const config = breadConfig();
+    render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged: vi.fn() } });
+
+    const added = await addDevice(config);
+    expect(added.id).toBe("rlht1");
+    await fireEvent.change(lastTypeSelect(), { target: { value: "dcmt" } });
+
+    const devices = config.devices as UnknownRecord[];
+    expect(devices[devices.length - 1].id).toBe("dcmt0");
+  });
+
+  it("keeps a typed device id across a type change", async () => {
+    const config = breadConfig();
+    render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged: vi.fn() } });
+
+    await addDevice(config);
+    const idInputs = screen.getAllByDisplayValue("rlht1");
+    await fireEvent.input(idInputs[idInputs.length - 1], { target: { value: "heater-a" } });
+    await fireEvent.change(lastTypeSelect(), { target: { value: "dcmt" } });
+
+    const devices = config.devices as UnknownRecord[];
+    expect(devices[devices.length - 1].id).toBe("heater-a");
+  });
+
+  it("gives the address box a placeholder that does not read as a value", async () => {
+    const config = breadConfig();
+    render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged: vi.fn() } });
+
+    await addDevice(config);
+    expect(screen.getAllByPlaceholderText("e.g. 0x0A").length).toBeGreaterThan(0);
+    expect(screen.queryByPlaceholderText("0x0A")).not.toBeInTheDocument();
   });
 });
 

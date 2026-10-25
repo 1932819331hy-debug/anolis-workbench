@@ -77,6 +77,25 @@
     return `${prefix}${nums.length ? Math.max(...nums) + 1 : 0}`;
   }
 
+  // Ids this form generated, by item, with the type they were made from. While
+  // an item's id is still that one, it follows a type change (#578); an id the
+  // user typed is never touched.
+  const generatedIds = new WeakMap<object, { id: string; prefix: string }>();
+
+  function rowChanged(record: UnknownRecord): void {
+    const generated = generatedIds.get(record);
+    if (generated && record.id !== generated.id) generatedIds.delete(record);
+    else if (generated && typeof record.type === "string" && record.type !== "") {
+      if (record.type !== generated.prefix) {
+        const others = ensureArray().filter((entry) => entry !== record);
+        const id = nextItemId(others, record.type);
+        record.id = id;
+        generatedIds.set(record, { id, prefix: record.type });
+      }
+    }
+    onChanged();
+  }
+
   function addObjectItem(): void {
     if (!items) return;
     const list = ensureArray();
@@ -87,11 +106,16 @@
       const options = enumOptions(propSchema);
       if (options && options.length > 0) item[propKey] = options[0].value;
     }
+    let generated: { id: string; prefix: string } | null = null;
     if (properties(items).some(([k]) => k === "id") && item.id === undefined) {
       const prefix = typeof item.type === "string" && item.type !== "" ? item.type : "item";
       item.id = nextItemId(list, prefix);
+      generated = { id: item.id as string, prefix };
     }
     list.push(item);
+    // The list holds its own (proxied) copy: key the generated id on that.
+    const added = list[list.length - 1];
+    if (generated && added && typeof added === "object") generatedIds.set(added, generated);
     onChanged();
   }
 
@@ -165,7 +189,7 @@
                 required={rowConditionals.required.has(propKey)}
                 requiredReason={rowConditionals.reasons.get(propKey) ?? null}
                 parent={record}
-                {onChanged}
+                onChanged={() => rowChanged(record)}
                 i2cImport={null}
               />
             {/if}

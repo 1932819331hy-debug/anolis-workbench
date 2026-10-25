@@ -471,3 +471,37 @@ describe("Compose.svelte — removing a variant removes the providers only it ra
     expect(Object.keys(doc.host_paths?.providers ?? {})).toEqual(["sim0"]);
   });
 });
+
+describe("Compose.svelte — a failed save shows untouched required fields (#578)", () => {
+  it("reports an empty required provider field after a failed save, not before", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(422, { error: "Validation failed", errors: [] })),
+    );
+    const doc = reactive(
+      withProvider(createProjectDocument("demo"), "bread0", "bread", {
+        provider: { name: "bread0" },
+        hardware: {},
+        discovery: { mode: "scan" },
+        devices: [],
+      }),
+    );
+    render(Compose, {
+      props: {
+        projectName: "demo",
+        system: doc,
+        providerSchemas: schemasResponseForPins(),
+        runtimeStatus: createRuntimeStatus(),
+        onDirty: vi.fn(),
+        onSaved: vi.fn(),
+      },
+    });
+
+    const bus = await screen.findByPlaceholderText("/dev/i2c-1 or mock://name");
+    expect(bus).not.toHaveAttribute("aria-invalid");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(bus).toHaveAttribute("aria-invalid", "true"));
+  });
+});

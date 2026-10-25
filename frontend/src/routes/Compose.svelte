@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { setContext } from "svelte";
   import { ApiResponseError, fetchJson } from "../lib/api";
+  import { SAVE_ATTEMPT_CONTEXT } from "../lib/schema-form/schema";
   import {
     activeVariant,
     AUTOMATION_VARIANT,
@@ -62,6 +64,9 @@
   );
 
   let saving = $state<boolean>(false);
+  // Once a save fails, provider forms show every empty required field (#578).
+  const saveAttempt = $state({ failed: false });
+  setContext(SAVE_ATTEMPT_CONTEXT, saveAttempt);
   let saveError = $state<string>("");
   let saveErrors = $state<Array<{ path?: string; message?: string }>>([]);
 
@@ -161,8 +166,10 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(system),
       });
+      saveAttempt.failed = false;
       onSaved();
     } catch (err) {
+      saveAttempt.failed = true;
       if (err instanceof ApiResponseError && err.payload && typeof err.payload === "object") {
         const payload = err.payload as ApiErrorResponse;
         saveErrors = Array.isArray(payload.errors) ? payload.errors : [];

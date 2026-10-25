@@ -344,6 +344,10 @@ body {
   font-size: 12px;
 }
 
+.field-invalid {
+  border-color: var(--feedback-error);
+}
+
 .field-note {
   color: var(--text-muted);
   font-size: 12px;

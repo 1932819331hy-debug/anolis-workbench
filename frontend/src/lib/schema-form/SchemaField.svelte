@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getContext } from "svelte";
   import type { UnknownRecord } from "../contracts";
   import SchemaArray from "./SchemaArray.svelte";
   import SchemaFieldSelf from "./SchemaField.svelte";
@@ -13,6 +14,7 @@
     parseI2c,
     placeholderFor,
     resolveConditionals,
+    SAVE_ATTEMPT_CONTEXT,
     validateField,
     type SchemaNode,
   } from "./schema";
@@ -61,6 +63,16 @@
   const childProperties = $derived(isObject ? authoredProperties(schema) : []);
   const error = $derived(!isObject && !isArray ? validateField(schema, value, required) : null);
   const reason = $derived(error === "Required" ? requiredReason : null);
+
+  // An empty required field is not reported until the user has left it or a
+  // save has failed: a line that appears on load and vanishes on the first
+  // commit moves the fields below it under the cursor (#578). The label's *
+  // and aria-required say it is required meanwhile.
+  const saveAttempt = getContext<{ failed: boolean } | undefined>(SAVE_ATTEMPT_CONTEXT);
+  let touched = $state(false);
+  const shownError = $derived(
+    error === "Required" && !touched && !saveAttempt?.failed ? null : error,
+  );
 
   // Nested object sections whose container doesn't exist yet render into a
   // local draft; the draft is committed to the document on the first child
@@ -161,6 +173,10 @@
       >{label}{#if required}<span class="required-mark" title="Required">*</span>{/if}</label
     >
     <select
+      aria-required={required}
+      aria-invalid={shownError ? "true" : undefined}
+      class:field-invalid={shownError !== null}
+      onblur={() => (touched = true)}
       value={typeof value === "string" ? value : ""}
       onchange={(e: Event) => commit(selectTarget(e).value || undefined)}
     >
@@ -172,7 +188,7 @@
       {/each}
     </select>
     {#if description}<span class="field-note">{description}</span>{/if}
-    {#if error}<span class="field-error">{error}</span>{/if}
+    {#if shownError}<span class="field-error">{shownError}</span>{/if}
     {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {:else if control.control === "checkbox"}
@@ -193,6 +209,10 @@
       >{label}{#if required}<span class="required-mark" title="Required">*</span>{/if}</label
     >
     <input
+      aria-required={required}
+      aria-invalid={shownError ? "true" : undefined}
+      class:field-invalid={shownError !== null}
+      onblur={() => (touched = true)}
       type="number"
       min={control.min}
       max={control.max}
@@ -202,7 +222,7 @@
       onchange={(e: Event) => commitNumber(inputTarget(e).value)}
     />
     {#if description}<span class="field-note">{description}</span>{/if}
-    {#if error}<span class="field-error">{error}</span>{/if}
+    {#if shownError}<span class="field-error">{shownError}</span>{/if}
     {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {:else if control.control === "i2c"}
@@ -211,16 +231,20 @@
       >{label}{#if required}<span class="required-mark" title="Required">*</span>{/if}</label
     >
     <input
+      aria-required={required}
+      aria-invalid={shownError ? "true" : undefined}
+      class:field-invalid={shownError !== null}
+      onblur={() => (touched = true)}
       type="text"
       spellcheck="false"
       style="font-family:monospace"
       class="device-addr-input"
-      placeholder={placeholderFor(schema) ?? "0x0A"}
+      placeholder={placeholderFor(schema) ?? "e.g. 0x0A"}
       value={value === undefined || value === null ? "" : String(value)}
       onchange={(e: Event) => commitI2c(inputTarget(e).value)}
     />
     {#if description}<span class="field-note">{description}</span>{/if}
-    {#if error}<span class="field-error">{error}</span>{/if}
+    {#if shownError}<span class="field-error">{shownError}</span>{/if}
     {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {:else}
@@ -229,6 +253,10 @@
       >{label}{#if required}<span class="required-mark" title="Required">*</span>{/if}</label
     >
     <input
+      aria-required={required}
+      aria-invalid={shownError ? "true" : undefined}
+      class:field-invalid={shownError !== null}
+      onblur={() => (touched = true)}
       type="text"
       spellcheck="false"
       placeholder={placeholderFor(schema) ?? undefined}
@@ -236,7 +264,7 @@
       oninput={(e: Event) => commit(inputTarget(e).value || undefined)}
     />
     {#if description}<span class="field-note">{description}</span>{/if}
-    {#if error}<span class="field-error">{error}</span>{/if}
+    {#if shownError}<span class="field-error">{shownError}</span>{/if}
     {#if reason}<span class="field-note">{reason}</span>{/if}
   </div>
 {/if}

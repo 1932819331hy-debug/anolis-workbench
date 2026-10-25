@@ -14,6 +14,13 @@ import type { UnknownRecord } from "../contracts";
 
 export type SchemaNode = UnknownRecord;
 
+/**
+ * Context key for `{ failed: boolean }`, set by the form's owner: true once a
+ * save has failed, so empty required fields show their "Required" line even
+ * if untouched (#578).
+ */
+export const SAVE_ATTEMPT_CONTEXT = Symbol("schema-form-save-attempt");
+
 export interface EnumOption {
   value: string;
   title: string;
