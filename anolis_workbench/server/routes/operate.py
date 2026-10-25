@@ -206,7 +206,9 @@ def proxy_runtime(handler, method: str, raw_path: str) -> None:
 
             if wants_stream:
                 while True:
-                    chunk = response.read(4096)
+                    # read1, not read: read(4096) waits for 4096 bytes, so events
+                    # sat in the proxy and a closed tab went unnoticed (#616).
+                    chunk = response.read1(4096)
                     if not chunk:
                         break
                     try:

@@ -10,7 +10,12 @@ interim remote-operate surface until the device-registry UX
 
 from __future__ import annotations
 
+import http.server
 import io
+import queue
+import socket
+import threading
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -191,7 +196,7 @@ class _EventStream(_FakeResponse):
         self.reads = 0
         self.closed = False
 
-    def read(self, *_args: Any) -> bytes:
+    def read1(self, *_args: Any) -> bytes:
         self.reads += 1
         return b"data: {}\n\n"
 
@@ -503,3 +508,124 @@ def test_other_requests_resolve_the_target_each_time(method: str, path: str, mon
 
     assert urls == []
     assert handler.json_payloads == [(503, {"error": "Runtime is not running"})]
+
+
+# ---------------------------------------------------------------------------
+# /v0/events forwards each event as it arrives, and lets the runtime's stream
+# go once the client has (#616). Real sockets: the fault was in how
+# http.client reads a chunked stream, which a fake response can't show.
+# ---------------------------------------------------------------------------
+
+
+class _ChunkedEvents(http.server.BaseHTTPRequestHandler):
+    """A runtime's /v0/events, chunked as cpp-httplib sends it. The test
+    paces it through the server's `send_next` queue, one event per item."""
+
+    protocol_version = "HTTP/1.1"
+
+    def do_GET(self) -> None:  # noqa: N802
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        state = self.server.state  # type: ignore[attr-defined]
+        try:
+            while True:
+                seq = state["send_next"].get(timeout=10)
+                if seq is None:
+                    return
+                event = f'event: state_update\ndata: {{"seq": {seq}}}\n\n'.encode()
+                self.wfile.write(f"{len(event):x}\r\n".encode() + event + b"\r\n")
+                self.wfile.flush()
+                state["sent"].append(seq)
+                # Has the proxy closed its end? A peek at a closed socket is b"".
+                time.sleep(0.05)
+                self.connection.setblocking(False)
+                try:
+                    if self.connection.recv(1, socket.MSG_PEEK) == b"":
+                        state["upstream_closed_after"] = seq
+                        return
+                except BlockingIOError:
+                    pass
+                finally:
+                    self.connection.setblocking(True)
+                state["checked"] = seq
+        except (OSError, queue.Empty):
+            return
+
+    def log_message(self, *_args: Any) -> None:
+        pass
+
+
+class _ProxyHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802
+        operate.proxy_runtime(self, "GET", self.path)
+
+    def _json(self, status: int, payload: dict[str, Any]) -> None:
+        raise AssertionError((status, payload))
+
+    def log_message(self, *_args: Any) -> None:
+        pass
+
+
+@pytest.fixture
+def event_stream(monkeypatch: pytest.MonkeyPatch):
+    """A client socket reading /v0/events through proxy_runtime, and the
+    runtime's state: its `send_next` queue and the events it `sent`."""
+    state: dict[str, Any] = {"send_next": queue.Queue(), "sent": [], "checked": 0, "upstream_closed_after": None}
+    runtime = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _ChunkedEvents)
+    runtime.state = state  # type: ignore[attr-defined]
+    proxy = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _ProxyHandler)
+    for server in (runtime, proxy):
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    monkeypatch.setenv("ANOLIS_WORKBENCH_RUNTIME_URL", f"http://127.0.0.1:{runtime.server_address[1]}")
+
+    client = socket.create_connection(("127.0.0.1", proxy.server_address[1]), timeout=3)
+    client.sendall(b"GET /v0/events HTTP/1.1\r\nHost: workbench\r\nAccept: text/event-stream\r\n\r\n")
+    try:
+        yield client, state
+    finally:
+        state["send_next"].put(None)
+        client.close()
+        for server in (runtime, proxy):
+            server.shutdown()
+            server.server_close()
+
+
+def _read_until(client: socket.socket, marker: bytes) -> bytes:
+    received = b""
+    while marker not in received:
+        data = client.recv(65536)  # the socket's 3 s timeout fails a stalled stream
+        if not data:
+            raise AssertionError(f"stream ended before {marker!r}")
+        received += data
+    return received
+
+
+def test_each_event_reaches_the_client_before_the_next_is_sent(event_stream) -> None:
+    client, state = event_stream
+    for seq in (1, 2, 3):
+        state["send_next"].put(seq)
+        _read_until(client, f'"seq": {seq}}}'.encode())
+        assert state["sent"] == list(range(1, seq + 1))
+
+
+def test_the_runtime_stream_closes_within_two_events_of_the_client_leaving(event_stream) -> None:
+    client, state = event_stream
+    state["send_next"].put(1)
+    deadline = time.monotonic() + 2
+    while state["checked"] < 1 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert state["sent"] == [1]  # the proxy holds the runtime's stream open
+
+    client.close()
+    for seq in range(2, 12):
+        state["send_next"].put(seq)
+        deadline = time.monotonic() + 2
+        while state["checked"] < seq and state["upstream_closed_after"] is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        if state["upstream_closed_after"] is not None:
+            break
+
+    assert state["upstream_closed_after"] is not None, f"upstream still open after events {state['sent']}"
+    assert state["upstream_closed_after"] <= 3  # event 1, then at most two after the close
