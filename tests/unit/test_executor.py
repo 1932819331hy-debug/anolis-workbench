@@ -299,3 +299,56 @@ class TestAllowlistBoundary:
         from anolis_workbench.core.executor import _ALLOWED_COMMANDS
 
         assert not [c for c in _ALLOWED_COMMANDS if c.startswith("anolis-")]
+
+
+class TestRuntimeVersionPath:
+    """allow_runtime_version admits one exact path, and only with --version (#567)."""
+
+    def test_the_exact_path_with_version_is_allowed(self) -> None:
+        from anolis_workbench.core.executor import _validate_command
+
+        executor = LocalExecutor()
+        path = executor.allow_runtime_version("/opt/anolis")
+        assert path == "/opt/anolis/bin/anolis-runtime"
+        assert _validate_command([path, "--version"], executor._allowed_paths) == [path, "--version"]
+
+    @pytest.mark.parametrize(
+        "args",
+        [[], ["--config", "x.yaml"], ["--version", "--config", "x.yaml"], ["-c", "id"]],
+        ids=["none", "other", "extra", "shell"],
+    )
+    def test_the_path_with_other_arguments_is_refused(self, args: list[str]) -> None:
+        from anolis_workbench.core.executor import _validate_command
+
+        executor = LocalExecutor()
+        path = executor.allow_runtime_version("/opt/anolis")
+        with pytest.raises(ValueError, match="allowed only as"):
+            _validate_command([path, *args], executor._allowed_paths)
+
+    @pytest.mark.parametrize(
+        "binary",
+        ["/home/me/bin/anolis-runtime", "/opt/anolis-old/bin/anolis-runtime", "anolis-runtime"],
+        ids=["other-dir", "other-prefix", "bare"],
+    )
+    def test_any_other_anolis_runtime_is_refused(self, binary: str) -> None:
+        from anolis_workbench.core.executor import _validate_command
+
+        executor = LocalExecutor()
+        executor.allow_runtime_version("/opt/anolis")
+        with pytest.raises(ValueError, match="not in the executor allowlist"):
+            _validate_command([binary, "--version"], executor._allowed_paths)
+
+    def test_the_path_is_admitted_only_by_the_executor_that_allowed_it(self) -> None:
+        allowed = LocalExecutor()
+        allowed.allow_runtime_version("/opt/anolis")
+        with pytest.raises(ValueError, match="not in the executor allowlist"):
+            LocalExecutor().run(["/opt/anolis/bin/anolis-runtime", "--version"])
+
+    @pytest.mark.parametrize(
+        "prefix", ["opt/anolis", "/opt/../tmp", "/opt/anolis/.."], ids=["relative", "dotdot", "trailing-dotdot"]
+    )
+    def test_a_relative_or_dotdot_prefix_is_refused(self, prefix: str) -> None:
+        executor = LocalExecutor()
+        with pytest.raises(ValueError, match="must be absolute, with no '..'"):
+            executor.allow_runtime_version(prefix)
+        assert executor._allowed_paths == frozenset()

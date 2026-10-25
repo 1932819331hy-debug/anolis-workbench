@@ -58,6 +58,11 @@ _PRESERVED_CONFIG_MESSAGES = (_RUNTIME_CONFIG_MESSAGE, "config (providers):", "t
 
 ProgressCallback = Callable[[str, str], None]
 
+# The first runtime whose install.sh refuses to install an older runtime over
+# a newer one (anolishq/anolis#366, phase_version_check).
+DOWNGRADE_GUARD_VERSION = (0, 1, 45)
+_XYZ_RE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+
 
 class DeployError(RuntimeError):
     """Raised when a deployment cannot be materialized or install.sh fails."""
@@ -551,6 +556,66 @@ def _existing_config_notice(executor: Executor, prefix: pathlib.Path, variant: s
     return notice + "."
 
 
+def _xyz(text: str) -> tuple[int, int, int] | None:
+    match = _XYZ_RE.search(text)
+    return (int(match[1]), int(match[2]), int(match[3])) if match else None
+
+
+def _installed_runtime_version(executor: Executor, prefix: pathlib.Path) -> tuple[int, int, int] | None:
+    """The X.Y.Z of the runtime installed under prefix, or None when none is.
+
+    Measured by running the binary, as install.sh's own version check does:
+    an installed manifest.json can be stale (anolishq/anolis#345). A runtime
+    that is there but reports no version is a DeployError, since a downgrade
+    could not then be ruled out."""
+    path = executor.allow_runtime_version(prefix)
+    try:
+        if not executor.file_exists(path):
+            return None
+        result = executor.run([path, "--version"], timeout=30)
+    except Exception as exc:  # noqa: BLE001 — reported as the deploy's refusal
+        raise DeployError(
+            f"could not read the runtime version from {path} on the target ({exc}); nothing was deployed."
+        ) from exc
+    version = _xyz(result.stdout) if result.returncode == 0 else None
+    if version is None:
+        detail = (result.stdout + result.stderr).strip().splitlines()[-1:] or ["no output"]
+        raise DeployError(
+            f"{path} on the target reports no version (exit {result.returncode}: {detail[0]}), "
+            "so a downgrade cannot be ruled out; nothing was deployed."
+        )
+    return version
+
+
+def _check_downgrade(
+    executor: Executor, prefix: pathlib.Path, runtime_version: str, progress: ProgressCallback
+) -> None:
+    """Refuse, before anything is fetched or pushed, a pin whose install.sh
+    would downgrade the target's runtime without asking (#567)."""
+    installed = _installed_runtime_version(executor, prefix)
+    if installed is None:
+        return
+    pinned = _xyz(runtime_version)
+    if pinned is None:
+        raise DeployError(f"the project's runtime pin '{runtime_version}' is not X.Y.Z; nothing was deployed.")
+    if pinned >= installed:
+        return
+    have = ".".join(map(str, installed))
+    want = ".".join(map(str, pinned))
+    guard = ".".join(map(str, DOWNGRADE_GUARD_VERSION))
+    if pinned < DOWNGRADE_GUARD_VERSION:
+        raise DeployError(
+            f"The target runs runtime {have}, newer than this project's pin {want}. install.sh {want} "
+            f"predates the downgrade guard (runtime {guard}), so it would install the older runtime "
+            f"without asking. Nothing was deployed. Pin runtime {have} or newer to deploy."
+        )
+    progress(
+        "downgrade",
+        f"The target runs runtime {have}, newer than this project's pin {want}; "
+        f"install.sh {want} refuses to downgrade it. Pin runtime {have} or newer to deploy.",
+    )
+
+
 def _preflight_needs_attention(block: list[str]) -> bool:
     return any(line.startswith(("✗", "⚠")) for line in block)
 
@@ -618,6 +683,7 @@ def deploy_local(
         tmp = pathlib.Path(td)
         _progress("materialize", "Copying machine-profile project for install.sh")
         mat = materialize_project_dir(project_dir, tmp, variant=variant)
+        _check_downgrade(executor, prefix, mat.runtime_version, _progress)
         _progress("fetch", f"Fetching install.sh v{mat.runtime_version}")
         install_sh, warning = fetch_install_sh(mat.runtime_version, tmp)
         if warning:
@@ -679,6 +745,7 @@ def deploy_remote(
         tmp = pathlib.Path(td)
         _progress("materialize", "Copying machine-profile project for install.sh")
         mat = materialize_project_dir(project_dir, tmp, variant=variant)
+        _check_downgrade(executor, prefix, mat.runtime_version, _progress)
         install_sh, warning = fetch_install_sh(mat.runtime_version, tmp)
         if warning:
             _progress("unverified", warning)

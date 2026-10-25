@@ -62,6 +62,17 @@ replacement for it.
 On a target that already has a runtime or provider config, `install.sh`
 keeps it in place and the deploy result says so.
 
+Before it fetches `install.sh`, the deploy runs the target's
+`<prefix>/bin/anolis-runtime --version`. When the project pins an older
+runtime, the deploy:
+
+- refuses, with nothing fetched or pushed, if the pin is older than
+  0.1.45, because that `install.sh` would downgrade without asking;
+- warns otherwise, and `install.sh` refuses the downgrade itself.
+
+A runtime that is installed but reports no version is refused as well. A
+target with no runtime installed is a fresh install.
+
 ## 4) Export Package (Provenance Record)
 
 Workbench path:

@@ -10,7 +10,7 @@ import shlex
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath
 
 from anolis_workbench.core.child_env import child_env
 
@@ -51,8 +51,11 @@ _ALLOWED_COMMANDS: set[str] = {
 }
 
 
-def _validate_command(cmd: list[str]) -> list[str]:
+def _validate_command(cmd: list[str], allowed_paths: frozenset[str] = frozenset()) -> list[str]:
     """Validate command against the binary allowlist and return a sanitized copy.
+
+    allowed_paths holds exact paths an executor admits beyond the allowlist,
+    each only as `<path> --version` (Executor.allow_runtime_version).
 
     The returned list is a fresh copy with the binary resolved from the
     allowlist set, breaking data-flow from untrusted sources.
@@ -62,6 +65,11 @@ def _validate_command(cmd: list[str]) -> list[str]:
     """
     if not cmd:
         raise ValueError("Empty command")
+    if cmd[0] in allowed_paths:
+        if [str(a) for a in cmd[1:]] != ["--version"]:
+            raise ValueError(f"'{cmd[0]}' is allowed only as '{cmd[0]} --version'")
+        verified_path: str = next(p for p in allowed_paths if p == cmd[0])
+        return [verified_path, "--version"]
     binary = cmd[0].rsplit("/", 1)[-1]  # basename
     if binary not in _ALLOWED_COMMANDS:
         raise ValueError(f"Command '{binary}' is not in the executor allowlist. Allowed: {sorted(_ALLOWED_COMMANDS)}")
@@ -83,6 +91,20 @@ class RunResult:
 
 class Executor(ABC):
     """Abstract base for command execution on a target machine."""
+
+    _allowed_paths: frozenset[str] = frozenset()
+
+    def allow_runtime_version(self, prefix: str | PurePath) -> str:
+        """Admit exactly `<prefix>/bin/anolis-runtime --version` on this
+        executor; that path with any other arguments is still refused. Deploy
+        measures the installed runtime this way before install.sh runs
+        (#567). Returns the path."""
+        posix_prefix = PurePosixPath(prefix)
+        if not posix_prefix.is_absolute() or ".." in posix_prefix.parts:
+            raise ValueError(f"install prefix must be absolute, with no '..': {prefix}")
+        path = (posix_prefix / "bin" / "anolis-runtime").as_posix()
+        self._allowed_paths = self._allowed_paths | {path}
+        return path
 
     @abstractmethod
     def run(
@@ -142,7 +164,7 @@ class LocalExecutor(Executor):
     def run(
         self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False, timeout: float | None = None
     ) -> RunResult:
-        safe_cmd = _validate_command(cmd)
+        safe_cmd = _validate_command(cmd, self._allowed_paths)
         timeout = timeout if timeout else 30
         password = self._sudo_password
         if sudo and password:
@@ -206,7 +228,7 @@ class SubprocessSSHExecutor(Executor):
     def run(
         self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False, timeout: float | None = None
     ) -> RunResult:
-        safe_cmd = _validate_command(cmd)
+        safe_cmd = _validate_command(cmd, self._allowed_paths)
         remote_cmd = (["sudo"] + safe_cmd) if sudo else safe_cmd
         ssh_cmd = self._ssh_base(allocate_pty=sudo) + [shlex.join(remote_cmd)]
         result = subprocess.run(
@@ -280,7 +302,7 @@ class ParamikoSSHExecutor(Executor):
     def run(
         self, cmd: list[str], *, input: bytes | None = None, sudo: bool = False, timeout: float | None = None
     ) -> RunResult:
-        safe_cmd = _validate_command(cmd)
+        safe_cmd = _validate_command(cmd, self._allowed_paths)
         remote_cmd = shlex.join(safe_cmd)
         if sudo:
             remote_cmd = f"sudo {remote_cmd}"

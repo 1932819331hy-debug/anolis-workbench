@@ -262,6 +262,155 @@ def _stub_fetch(monkeypatch: pytest.MonkeyPatch, warning: str | None = None) -> 
     monkeypatch.setattr(deploy, "fetch_install_sh", _fake_fetch)
 
 
+# ---------------------------------------------------------------------------
+# The installed runtime, measured before anything is fetched (#567)
+# ---------------------------------------------------------------------------
+
+_RUNTIME_BIN = "/opt/anolis/bin/anolis-runtime"
+
+
+class InstalledRuntimeExecutor(RecordingExecutor):
+    """A target whose prefix holds a runtime answering --version with stdout."""
+
+    def __init__(self, stdout: str | None, *, returncode: int = 0, exists_error: Exception | None = None) -> None:
+        super().__init__()
+        self.version_stdout = stdout
+        self.version_returncode = returncode
+        self.exists_error = exists_error
+
+    def file_exists(self, path):
+        if self.exists_error is not None:
+            raise self.exists_error
+        return path == _RUNTIME_BIN and self.version_stdout is not None
+
+    def run(self, cmd, *, input=None, sudo=False, timeout=None):
+        if cmd[0] == _RUNTIME_BIN:
+            assert list(cmd) == [_RUNTIME_BIN, "--version"]
+            assert sudo is False
+            self.commands.append({"cmd": list(cmd), "sudo": sudo, "timeout": timeout})
+            return RunResult(returncode=self.version_returncode, stdout=self.version_stdout or "", stderr="")
+        return super().run(cmd, input=input, sudo=sudo, timeout=timeout)
+
+
+def _pin_runtime(project_dir: pathlib.Path, version: str) -> None:
+    path = project_dir / "machine-profile.yaml"
+    profile = yaml.safe_load(path.read_text(encoding="utf-8"))
+    profile["components"]["runtime"]["version"] = version
+    path.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
+
+
+def _refuse_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _fetch(version: str, dest: pathlib.Path) -> tuple[pathlib.Path, str | None]:
+        raise AssertionError("install.sh was fetched")
+
+    monkeypatch.setattr(deploy, "fetch_install_sh", _fetch)
+
+
+def _deploy(remote: bool, project_dir: pathlib.Path, executor: Executor, events: list[tuple[str, str]]):
+    deploy_fn = deploy.deploy_remote if remote else deploy.deploy_local
+    return deploy_fn(
+        project_dir=project_dir,
+        project_name="deploy-fixture",
+        executor=executor,
+        progress_callback=lambda step, detail: events.append((step, detail)),
+    )
+
+
+@pytest.mark.parametrize("remote", [False, True], ids=["local", "remote"])
+def test_deploy_refuses_a_pre_guard_pin_below_the_installed_runtime(
+    remote: bool, project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _refuse_fetch(monkeypatch)
+    executor = InstalledRuntimeExecutor("anolis-runtime 0.1.50\n")
+    with pytest.raises(deploy.DeployError, match=r"runs runtime 0\.1\.50.*pin 0\.1\.27.*predates the downgrade guard"):
+        _deploy(remote, project_dir, executor, [])
+    # Only the version probe ran: install.sh was neither fetched nor run, and
+    # nothing was pushed.
+    assert executor.commands == [{"cmd": [_RUNTIME_BIN, "--version"], "sudo": False, "timeout": 30}]
+    assert executor.files == {}
+
+
+@pytest.mark.parametrize("remote", [False, True], ids=["local", "remote"])
+def test_deploy_warns_on_a_guarded_pin_below_the_installed_runtime(
+    remote: bool, project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _pin_runtime(project_dir, "0.1.46")
+    _stub_fetch(monkeypatch)
+    executor = InstalledRuntimeExecutor("anolis-runtime 0.1.50\n")
+    events: list[tuple[str, str]] = []
+    result = _deploy(remote, project_dir, executor, events)
+    assert result.runtime_version == "0.1.46"
+    warnings = [detail for step, detail in events if step == "downgrade"]
+    assert len(warnings) == 1
+    assert "runs runtime 0.1.50, newer than this project's pin 0.1.46" in warnings[0]
+    # install.sh 0.1.46 refuses the downgrade itself; it still runs.
+    assert executor.commands[-1]["cmd"][0] == "bash"
+
+
+@pytest.mark.parametrize("remote", [False, True], ids=["local", "remote"])
+@pytest.mark.parametrize("installed", ["anolis-runtime 0.1.27\n", "anolis-runtime 0.1.9\n"], ids=["same", "older"])
+def test_deploy_proceeds_quietly_when_the_pin_is_not_older(
+    remote: bool, installed: str, project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 0.1.9 < 0.1.27 numerically; as strings it would sort above.
+    _stub_fetch(monkeypatch)
+    executor = InstalledRuntimeExecutor(installed)
+    events: list[tuple[str, str]] = []
+    _deploy(remote, project_dir, executor, events)
+    assert not [step for step, _ in events if step == "downgrade"]
+    assert executor.commands[0]["cmd"] == [_RUNTIME_BIN, "--version"]
+    assert executor.commands[-1]["cmd"][0] == "bash"
+
+
+def test_deploy_refuses_a_pin_that_is_not_xyz_over_an_installed_runtime(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The machine-profile schema takes any non-empty version string.
+    _pin_runtime(project_dir, "latest")
+    _refuse_fetch(monkeypatch)
+    executor = InstalledRuntimeExecutor("anolis-runtime 0.1.50\n")
+    with pytest.raises(deploy.DeployError, match="pin 'latest' is not X.Y.Z; nothing was deployed"):
+        _deploy(False, project_dir, executor, [])
+    assert executor.files == {}
+
+
+@pytest.mark.parametrize("remote", [False, True], ids=["local", "remote"])
+def test_deploy_treats_a_target_with_no_runtime_as_fresh(
+    remote: bool, project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_fetch(monkeypatch)
+    executor = InstalledRuntimeExecutor(None)
+    events: list[tuple[str, str]] = []
+    _deploy(remote, project_dir, executor, events)
+    assert not [c for c in executor.commands if c["cmd"][0] == _RUNTIME_BIN]
+    assert not [step for step, _ in events if step == "downgrade"]
+    assert executor.commands[-1]["cmd"][0] == "bash"
+
+
+@pytest.mark.parametrize("remote", [False, True], ids=["local", "remote"])
+@pytest.mark.parametrize(
+    ("executor", "reason"),
+    [
+        (InstalledRuntimeExecutor("", returncode=126), r"reports no version \(exit 126: no output\)"),
+        (InstalledRuntimeExecutor("anolis-runtime dev\n"), r"reports no version \(exit 0: anolis-runtime dev\)"),
+        (InstalledRuntimeExecutor(None, exists_error=OSError("connection reset")), r"could not read.*connection reset"),
+    ],
+    ids=["will-not-run", "no-xyz", "cannot-check"],
+)
+def test_deploy_refuses_a_runtime_whose_version_cannot_be_read(
+    remote: bool,
+    executor: InstalledRuntimeExecutor,
+    reason: str,
+    project_dir: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _refuse_fetch(monkeypatch)
+    with pytest.raises(deploy.DeployError, match=f"{reason}.*nothing was deployed"):
+        _deploy(remote, project_dir, executor, [])
+    assert not [c for c in executor.commands if c["cmd"][0] == "bash"]
+    assert executor.files == {}
+
+
 def test_deploy_local_runs_install_sh_project(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _stub_fetch(monkeypatch)
     executor = RecordingExecutor()
@@ -804,9 +953,13 @@ def test_a_target_that_cannot_be_asked_is_not_reported_as_pending(
 ) -> None:
     _stub_fetch(monkeypatch)
 
+    # The reboot check is advisory. The pre-deploy runtime check is not, so
+    # the target answers that one (no runtime installed).
     class _Unreachable(_ScriptedExecutor):
         def file_exists(self, path):
-            raise OSError("connection reset")
+            if path == deploy.REBOOT_REQUIRED_PATH:
+                raise OSError("connection reset")
+            return False
 
     with pytest.raises(deploy.DeployError, match="ezo0: host requirements unmet") as info:
         deploy.deploy_local(
