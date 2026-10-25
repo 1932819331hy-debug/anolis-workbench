@@ -928,4 +928,41 @@ describe('Operate.svelte — a device_removed event (#516)', () => {
     await waitFor(() => expect(runtime.capabilityReads).toEqual(['dev0', 'dev0']));
     expect(screen.getByRole('heading', { name: 'Heater (sim0/dev0)' })).toBeInTheDocument();
   });
+
+  it('drops a capabilities reply that was in flight when the device was removed', async () => {
+    // The reply for dev0's capabilities lands after its device_removed. Filing
+    // it would put the removed device's capabilities back, and a returning
+    // dev0 would never fetch its own.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.stubGlobal('EventSource', ListeningEventSource as unknown as typeof EventSource);
+    const runtime = { devices: [DEV0, DEV1], capabilityReads: [] as string[] };
+    const firstCaps = deferred<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = pathFromInput(input);
+        if (path === '/api/status') return jsonResponse(200, RUNNING);
+        if (path === '/v0/runtime/status') return status({ software_safe_state: 'zero', uncovered_actuating_functions: 0 });
+        if (path === '/v0/devices') return jsonResponse(200, { devices: runtime.devices });
+        const caps = path.match(/^\/v0\/devices\/sim0\/(dev\d)\/capabilities$/);
+        if (caps) {
+          runtime.capabilityReads.push(caps[1]);
+          if (runtime.capabilityReads.length === 1) return firstCaps.promise;
+          return jsonResponse(200, { capabilities: { signals: [], functions: [] } });
+        }
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, { props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING } });
+    await waitFor(() => expect(runtime.capabilityReads).toEqual(['dev0']));
+
+    runtime.devices = [DEV1];
+    ListeningEventSource.last?.emit('device_removed', { provider_id: 'sim0', device_id: 'dev0', timestamp_ms: 1 });
+    firstCaps.resolve(jsonResponse(200, { capabilities: { signals: [], functions: [] } }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    runtime.devices = [DEV0, DEV1];
+    await vi.advanceTimersByTimeAsync(5000);
+    await waitFor(() => expect(runtime.capabilityReads).toEqual(['dev0', 'dev0']));
+  });
 });

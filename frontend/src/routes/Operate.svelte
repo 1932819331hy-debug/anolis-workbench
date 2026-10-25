@@ -145,6 +145,9 @@
   let selectedKey = $state<string>("");
   let deviceStates = $state<Record<string, DeviceStateValue[]>>({});
   let capabilities = $state<Record<string, DeviceCapabilities>>({});
+  // device_removed events seen per key, so a reply in flight across one is
+  // dropped (wb#516). Not rendered, so not state.
+  const deviceRemovals: Record<string, number> = {};
   let runtimeStatusData = $state<RuntimeApiStatus | null>(null);
   // What `uncovered_actuating_functions` means depends on the runtime
   // version; see DISPATCHABLE_COVERAGE_SINCE.
@@ -421,23 +424,33 @@
     // File each reply under the device it was requested for: the selection can
     // change while these requests are in flight (wb#552).
     const key = selectedKey;
+    // A reply whose request left before a device_removed for this key is about
+    // the removed device: filing it would undo the removal (wb#516).
+    const removal = deviceRemovals[key] ?? 0;
+    const stale = () => (deviceRemovals[key] ?? 0) !== removal;
+    let values: DeviceStateValue[];
     try {
       const vp = await fetchJson<UnknownRecord>(
         `/v0/state/${encodeURIComponent(dev.provider_id)}/${encodeURIComponent(dev.device_id)}`,
       );
-      deviceStates = { ...deviceStates, [key]: extractDeviceStateValues(vp) };
+      values = extractDeviceStateValues(vp);
     } catch {
-      deviceStates = { ...deviceStates, [key]: [] };
+      values = [];
     }
+    if (stale()) return;
+    deviceStates = { ...deviceStates, [key]: values };
     if (!capabilities[key]) {
+      let caps: DeviceCapabilities;
       try {
         const cp = await fetchJson<UnknownRecord>(
           `/v0/devices/${encodeURIComponent(dev.provider_id)}/${encodeURIComponent(dev.device_id)}/capabilities`,
         );
-        capabilities = { ...capabilities, [key]: extractCapabilities(cp) };
+        caps = extractCapabilities(cp);
       } catch {
-        capabilities = { ...capabilities, [key]: { functions: [], signals: [] } };
+        caps = { functions: [], signals: [] };
       }
+      if (stale()) return;
+      capabilities = { ...capabilities, [key]: caps };
     }
   }
 
@@ -751,6 +764,8 @@
   }
 
   function consumeDeviceRemovedEvent(payload: UnknownRecord): void {
+    const key = `${payload.provider_id}/${payload.device_id}`;
+    deviceRemovals[key] = (deviceRemovals[key] ?? 0) + 1;
     const next = removeDevice({ devices, deviceStates, capabilities, selectedKey }, payload);
     devices = next.devices;
     deviceStates = next.deviceStates;
