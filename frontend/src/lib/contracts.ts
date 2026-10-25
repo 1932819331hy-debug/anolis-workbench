@@ -273,6 +273,8 @@ export interface RuntimeApiStatus extends UnknownRecord {
   polling_interval_ms: number;
   providers: RuntimeStatusProvider[];
   device_count: number;
+  /** Device handles blocked after going unreachable; empty when none. */
+  device_loss_latched: string[];
 }
 
 /**

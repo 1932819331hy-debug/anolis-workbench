@@ -174,6 +174,7 @@ export function extractRuntimeStatus(payload: unknown): RuntimeApiStatus {
     polling_interval_ms: toFinite(r.polling_interval_ms) ?? 0,
     device_count: toFinite(r.device_count) ?? 0,
     providers: asArray(r.providers) as RuntimeApiStatus["providers"],
+    device_loss_latched: asArray(r.device_loss_latched).map(String),
   };
 }
 
@@ -376,6 +377,37 @@ export function summarizeStartupSafeState(s: StartupSafeStateStatus): {
     return { text: "Outputs were left as they were at startup (on_startup: leave).", ok: true };
   }
   return { text: "No software safe state is declared, so nothing ran at startup.", ok: true };
+}
+
+/**
+ * The Runtime Status badge, from machine state (wb#557). `status.code` is the
+ * response envelope: it says the status request succeeded, so it decides only
+ * between loaded and UNAVAILABLE, never whether the machine is OK.
+ */
+export function summarizeRuntimeHealth(
+  status: RuntimeApiStatus | null,
+  estop: EstopStatus | null,
+  startup: StartupSafeStateStatus | null,
+): {
+  label: "OK" | "ATTENTION" | "UNAVAILABLE";
+  cls: "ok" | "fault" | "unavailable";
+  reasons: string[];
+} {
+  if (!status || String(status.status?.code || "").toUpperCase() !== "OK") {
+    return { label: "UNAVAILABLE", cls: "unavailable", reasons: [] };
+  }
+  const reasons: string[] = [];
+  if (estop?.latched) reasons.push("software stop latched");
+  if (startup && !summarizeStartupSafeState(startup).ok) {
+    reasons.push("startup safe state not achieved");
+  }
+  for (const p of status.providers) {
+    if (p.state !== "AVAILABLE") reasons.push(`provider ${p.provider_id} ${p.state}`);
+  }
+  for (const handle of status.device_loss_latched) reasons.push(`device ${handle} lost (latched)`);
+  return reasons.length > 0
+    ? { label: "ATTENTION", cls: "fault", reasons }
+    : { label: "OK", cls: "ok", reasons };
 }
 
 /**

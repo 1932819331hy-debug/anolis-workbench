@@ -16,6 +16,7 @@ import {
   extractParameters,
   extractProvidersHealth,
   extractRuntimeStatus,
+  extractStartupSafeState,
   normalizeArgSpec,
   normalizeFunctionArgs,
   normalizeFunctionSpecs,
@@ -26,6 +27,7 @@ import {
   RUNTIME_MODES,
   SOFTWARE_SAFE_STATES,
   summarizeEstopResponse,
+  summarizeRuntimeHealth,
   versionAtLeast,
 } from "../../src/lib/operate-contracts";
 
@@ -166,6 +168,7 @@ describe("operate-contracts extractors", () => {
       polling_interval_ms: 0,
       device_count: 0,
       providers: [],
+      device_loss_latched: [],
     });
 
     expect(
@@ -643,5 +646,76 @@ describe("versionAtLeast", () => {
   it("treats a missing version as old", () => {
     expect(versionAtLeast(undefined, "0.1.45")).toBe(false);
     expect(versionAtLeast(null, "0.1.45")).toBe(false);
+  });
+});
+
+describe("summarizeRuntimeHealth (wb#557)", () => {
+  const loaded = (providers: { provider_id: string; state: string }[] = []) =>
+    extractRuntimeStatus({ status: { code: "OK" }, providers });
+  const estop = (latched: boolean) =>
+    extractEstopStatus({ estop: { latched, software_safe_state: "hooks" } });
+  const startup = (achieved: boolean) =>
+    extractStartupSafeState({
+      startup_safe_state: {
+        on_startup: "safe_state",
+        ran: true,
+        software_safe_state: "hooks",
+        safe_state_achieved: achieved,
+        failed_actions: achieved
+          ? []
+          : [{ device_handle: "bread0/dcmt0", function: "set_mode", success: false, error: "WATCHDOG_TRIP" }],
+      },
+    });
+
+  it("is OK only when nothing in the machine state needs attention", () => {
+    expect(summarizeRuntimeHealth(loaded([{ provider_id: "bread0", state: "AVAILABLE" }]), estop(false), startup(true))).toEqual({
+      label: "OK",
+      cls: "ok",
+      reasons: [],
+    });
+  });
+
+  it("is not OK while the software stop is latched, though the request succeeded", () => {
+    const h = summarizeRuntimeHealth(loaded(), estop(true), null);
+    expect(h.label).toBe("ATTENTION");
+    expect(h.reasons).toEqual(["software stop latched"]);
+  });
+
+  it("is not OK when the startup safe state was not achieved", () => {
+    const h = summarizeRuntimeHealth(loaded(), estop(false), startup(false));
+    expect(h.label).toBe("ATTENTION");
+    expect(h.reasons).toEqual(["startup safe state not achieved"]);
+  });
+
+  it("names each device latched after going unreachable", () => {
+    const status = extractRuntimeStatus({
+      status: { code: "OK" },
+      providers: [],
+      device_loss_latched: ["bread0/dcmt0", "bread0/rlht0"],
+    });
+    const h = summarizeRuntimeHealth(status, estop(false), null);
+    expect(h.label).toBe("ATTENTION");
+    expect(h.reasons).toEqual([
+      "device bread0/dcmt0 lost (latched)",
+      "device bread0/rlht0 lost (latched)",
+    ]);
+  });
+
+  it("names each provider that is not AVAILABLE", () => {
+    const h = summarizeRuntimeHealth(
+      loaded([
+        { provider_id: "bread0", state: "AVAILABLE" },
+        { provider_id: "ezo0", state: "FAULT" },
+      ]),
+      null,
+      null,
+    );
+    expect(h.reasons).toEqual(["provider ezo0 FAULT"]);
+  });
+
+  it("uses the envelope only to tell loaded from UNAVAILABLE", () => {
+    expect(summarizeRuntimeHealth(null, estop(true), null).label).toBe("UNAVAILABLE");
+    const failed = extractRuntimeStatus({ status: { code: "UNAVAILABLE" }, providers: [] });
+    expect(summarizeRuntimeHealth(failed, null, null).label).toBe("UNAVAILABLE");
   });
 });

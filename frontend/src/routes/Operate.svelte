@@ -44,6 +44,7 @@
     renderBtOutline,
     RUNTIME_MODES,
     summarizeEstopResponse,
+    summarizeRuntimeHealth,
     summarizeStartupSafeState,
     versionAtLeast,
   } from "../lib/operate-contracts";
@@ -973,15 +974,11 @@
     <div class="operate-section">
       <h3>Runtime Status</h3>
       {#if runtimeStatusData}
-        <span
-          class="badge {String(runtimeStatusData.status?.code || '').toUpperCase() === 'OK'
-            ? 'ok'
-            : 'unavailable'}"
-        >
-          {String(runtimeStatusData.status?.code || "").toUpperCase() === "OK"
-            ? "OK"
-            : "UNAVAILABLE"}
-        </span>
+        {@const health = summarizeRuntimeHealth(runtimeStatusData, estop, startupSafeState)}
+        <span class="badge {health.cls}" data-testid="runtime-health">{health.label}</span>
+        {#if health.reasons.length > 0}
+          <span class="operate-meta">{health.reasons.join("; ")}.</span>
+        {/if}
         <span class="operate-meta">
           Mode {runtimeStatusData.mode} | Devices {runtimeStatusData.device_count} | Poll {runtimeStatusData.polling_interval_ms}ms
           | Uptime {runtimeStatusData.uptime_seconds}s
