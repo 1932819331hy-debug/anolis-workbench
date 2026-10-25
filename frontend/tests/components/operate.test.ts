@@ -362,6 +362,64 @@ describe("Operate.svelte — another project's runtime is running (#264)", () =>
   });
 });
 
+describe('Operate.svelte — switching devices with a request in flight (#552)', () => {
+  const DEVICES = {
+    devices: [
+      { provider_id: 'bread0', device_id: 'rlht0', display_name: 'Heater' },
+      { provider_id: 'bread0', device_id: 'dcmt0', display_name: 'Motor' },
+    ],
+  };
+  const state = (signal: string) =>
+    jsonResponse(200, { values: [{ signal_id: signal, value: 1, quality: 'OK', timestamp_ms: 0 }] });
+  const caps = (fn: string) =>
+    jsonResponse(200, { capabilities: { signals: [], functions: [{ function_id: 1, name: fn, args: {} }] } });
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it.each([['state'], ['capabilities']])(
+    "files the heater's late %s reply under the heater, not the motor now selected",
+    async (held) => {
+      const late = deferred<Response>();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL) => {
+          const path = pathFromInput(input);
+          if (path === '/api/status') return jsonResponse(200, RUNNING);
+          if (path === '/v0/devices') return jsonResponse(200, DEVICES);
+          if (path === '/v0/state/bread0/rlht0')
+            return held === 'state' ? late.promise.then(() => state('tc1_temp')) : state('tc1_temp');
+          if (path === '/v0/devices/bread0/rlht0/capabilities')
+            return held === 'capabilities'
+              ? late.promise.then(() => caps('set_setpoints'))
+              : caps('set_setpoints');
+          if (path === '/v0/state/bread0/dcmt0') return state('motor1_pwm');
+          if (path === '/v0/devices/bread0/dcmt0/capabilities') return caps('set_brake');
+          return jsonResponse(200, {});
+        }),
+      );
+      render(Operate, {
+        props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING },
+      });
+
+      await fireEvent.click(await screen.findByRole('button', { name: /Motor \(bread0\/dcmt0\)/ }));
+      expect(await screen.findByText('set_brake')).toBeInTheDocument();
+      late.resolve(jsonResponse(200, {}));
+      await tick();
+      await tick();
+
+      expect(screen.getByRole('heading', { name: 'Motor (bread0/dcmt0)' })).toBeInTheDocument();
+      expect(screen.getByText('motor1_pwm')).toBeInTheDocument();
+      expect(screen.getByText('set_brake')).toBeInTheDocument();
+      expect(screen.queryByText('tc1_temp')).not.toBeInTheDocument();
+      expect(screen.queryByText('set_setpoints')).not.toBeInTheDocument();
+
+      await fireEvent.click(screen.getByRole('button', { name: /Heater \(bread0\/rlht0\)/ }));
+      expect(await screen.findByText('set_setpoints')).toBeInTheDocument();
+      expect(screen.getByText('tc1_temp')).toBeInTheDocument();
+      expect(screen.queryByText('set_brake')).not.toBeInTheDocument();
+    },
+  );
+});
+
 describe('Operate.svelte — the /v0/events stream across mounts (#551)', () => {
   class CountingEventSource {
     static instances: CountingEventSource[] = [];
