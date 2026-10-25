@@ -438,3 +438,36 @@ describe("provider schema version skew (#283)", () => {
     expect(screen.queryByTestId("schema-skew-sim")).not.toBeInTheDocument();
   });
 });
+
+describe("Compose.svelte — removing a variant removes the providers only it ran (#554)", () => {
+  it("leaves no trace of a provider added while the automation variant was selected", async () => {
+    const doc = reactive(withProvider(createProjectDocument("demo"), "sim0", "sim"));
+    render(Compose, {
+      props: {
+        projectName: "demo",
+        system: doc,
+        providerSchemas: schemasResponseForPins(),
+        runtimeStatus: createRuntimeStatus(),
+        onDirty: vi.fn(),
+        onSaved: vi.fn(),
+      },
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: /Automation variant/ }));
+    await fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    await fireEvent.change(screen.getByRole("combobox", { name: "Kind for the new provider" }), {
+      target: { value: "bread" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add Provider" }));
+    expect(doc.variants[AUTOMATION_VARIANT].providers?.map((p) => p.id)).toEqual(["sim0", "bread0"]);
+
+    await fireEvent.click(screen.getByRole("button", { name: /Remove automation variant/ }));
+
+    const saved = JSON.stringify(doc);
+    expect(saved).not.toContain("bread0");
+    // sim0 is still run by the manual variant, so it stays.
+    expect(Object.keys(doc.providers)).toEqual(["sim0"]);
+    expect(Object.keys(doc.profile.providers)).toEqual(["sim0"]);
+    expect(Object.keys(doc.host_paths?.providers ?? {})).toEqual(["sim0"]);
+  });
+});

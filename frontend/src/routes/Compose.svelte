@@ -13,6 +13,7 @@
     type ProjectDocument,
     type ProviderSchemasResponse,
     type RuntimeStatus,
+    type UnknownRecord,
   } from "../lib/contracts";
   import ProfileForm from "../lib/ProfileForm.svelte";
   import ProfileView from "../lib/ProfileView.svelte";
@@ -111,7 +112,22 @@
     const doc = editable;
     if (!doc || !doc.variants[AUTOMATION_VARIANT]) return;
     const behaviorRef = doc.variants[AUTOMATION_VARIANT]?.automation?.behavior_tree;
+    const removedIds = (doc.variants[AUTOMATION_VARIANT]?.providers ?? []).map((p) => p.id);
     delete doc.variants[AUTOMATION_VARIANT];
+    // A provider only this variant ran would stay declared with no variant
+    // showing it, and the save would fail on fields no form offers (wb#554).
+    // Remove it the way ProviderList's removeProvider does.
+    const stillRun = new Set(
+      Object.values(doc.variants).flatMap((c) => (c.providers ?? []).map((p) => p.id)),
+    );
+    for (const id of removedIds) {
+      if (stillRun.has(id)) continue;
+      delete doc.profile.providers?.[id];
+      const compat = (doc.profile.compatibility as UnknownRecord | undefined)?.providers;
+      if (compat && typeof compat === "object") delete (compat as UnknownRecord)[id];
+      delete doc.providers?.[id];
+      delete doc.host_paths?.providers?.[id];
+    }
     // A launch.variant naming the removed variant would come back to life when
     // the variant is re-added, launching something nobody chose in
     // Commission. Unset it, which reads as manual. This is removal, not the
