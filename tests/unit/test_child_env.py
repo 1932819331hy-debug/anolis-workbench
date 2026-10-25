@@ -125,6 +125,8 @@ def launch_stubs(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> _Sp
     config = tmp_path / "launch.yaml"
     config.write_text("{}\n", encoding="utf-8")
     monkeypatch.setattr(launcher, "materialize_launch_config", lambda project_dir, system: config)
+    # These tests check the spawned environment, not launch's validation (#414).
+    monkeypatch.setattr("anolis_workbench.core.canonical_validator.validate_project", lambda system: [])
     monkeypatch.setattr(launcher.canonical, "host_paths", lambda doc: {"runtime_executable": str(exe)})
     monkeypatch.setattr(launcher.threading, "Thread", lambda *a, **k: type("T", (), {"start": lambda self: None})())
     monkeypatch.setattr(launcher, "_state", dict(launcher._state, log_lines_by_project={}))

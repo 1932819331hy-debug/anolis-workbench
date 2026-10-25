@@ -576,12 +576,30 @@ def _check_host_binary(check_name: str, exe: pathlib.Path | None, yaml_path: pat
 # ---------------------------------------------------------------------------
 
 
+class LaunchValidationError(RuntimeError):
+    """The project fails the blocking validation preflight runs (#414)."""
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__("Project failed validation; nothing was started or stopped.")
+        self.errors = errors
+
+
 def launch(name: str, system: dict, project_dir: pathlib.Path) -> None:
     """Start the anolis-runtime subprocess."""
 
     current = _current_runtime_snapshot(clean_stale=True)
     if current["running"]:
         raise RuntimeError("A system is already running.")
+
+    # The same blocking validation as preflight's "System-level validation":
+    # requiring a passing preflight is enforced only in the Commission UI, so
+    # a direct launch request must not start a project preflight would refuse
+    # (#414). Preflight's binary checks stay in preflight.
+    from anolis_workbench.core import canonical_validator  # local import, as in preflight
+
+    errors = canonical_validator.validate_project(system)
+    if errors:
+        raise LaunchValidationError(errors)
 
     # Project the canonical variant into a runnable host config.
     launch_config = str(materialize_launch_config(project_dir, system))
@@ -666,9 +684,12 @@ def stop() -> None:
 
 
 def restart(name: str, project_dir: pathlib.Path) -> None:
-    """Kill and relaunch using the already-rendered YAML on disk.
+    """Kill and relaunch the running project.
 
-    Does NOT re-read the project from disk — uses the YAML already on disk.
+    Re-reads the saved project: it picks the launch variant's rendered YAML,
+    and renders it again if that file is missing. So the saved project is
+    validated first, as launch() does, before the running runtime is stopped
+    (#414).
     """
     current = _current_runtime_snapshot(clean_stale=True)
     if not current["running"]:
@@ -683,12 +704,17 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
             f"Cannot restart '{name}' while '{current['project']}' is running. Stop '{current['project']}' first."
         )
 
-    stop()
-    time.sleep(0.5)  # Allow log reader thread to flush and clean up
-
+    from anolis_workbench.core import canonical_validator  # local import, as in preflight
     from anolis_workbench.core import projects as projects_module
 
     system = projects_module.get_project(name)
+    # Refuse before stop(), so a refused restart leaves the runtime running.
+    errors = canonical_validator.validate_project(system)
+    if errors:
+        raise LaunchValidationError(errors)
+
+    stop()
+    time.sleep(0.5)  # Allow log reader thread to flush and clean up
 
     log_path = project_dir / "logs" / "latest.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
