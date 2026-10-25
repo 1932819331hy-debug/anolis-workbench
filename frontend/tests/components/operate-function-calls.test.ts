@@ -123,3 +123,112 @@ describe('Operate.svelte — function calls (#580)', () => {
     expect(field(/channel/).value).toBe('2');
   });
 });
+
+describe('Operate.svelte — a string arg with allowed_values (#576)', () => {
+  // As the runtime emits them from anolis#467 on.
+  const ENUM_CAPS = {
+    capabilities: {
+      signals: [],
+      functions: [
+        {
+          function_id: 3,
+          name: 'set_mode',
+          category: 'CONFIG',
+          actuating: true,
+          args: { mode: { type: 'string', required: true, allowed_values: ['open_loop', 'closed_speed'] } },
+        },
+      ],
+    },
+  };
+
+  /**
+   * Like renderOperate, with ENUM_CAPS; returns the POST /v0/call bodies and a
+   * handle that stops the runtime or swaps the capabilities it reports.
+   */
+  function renderWithEnum() {
+    const calls: unknown[] = [];
+    const rt = { running: true, caps: ENUM_CAPS as unknown };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = pathFromInput(input);
+        if (path === '/api/status')
+          return jsonResponse(200, rt.running ? RUNNING : { running: false, active_project: null });
+        if (path === '/v0/devices') return jsonResponse(200, DEVICES);
+        if (path === '/v0/devices/bread0/dcmt0/capabilities') return jsonResponse(200, rt.caps);
+        if (path === '/v0/runtime/status') return jsonResponse(200, statusBody(false));
+        if (path === '/v0/call' && init?.method === 'POST') {
+          calls.push(JSON.parse(String(init.body)));
+          return jsonResponse(200, { status: { code: 'OK' } });
+        }
+        if (path === '/v0/estop' && init?.method === 'POST')
+          return jsonResponse(200, { latched: true, software_safe_state: 'zero', actions: [] });
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Operate, { props: { projectName: 'demo', system: createProjectDocument('demo'), runtimeStatus: RUNNING } });
+    return { calls, rt };
+  }
+
+  it('renders a select of the allowed values and sends the one chosen', async () => {
+    const { calls } = renderWithEnum();
+    const mode = (await screen.findByLabelText(/^mode/)) as HTMLSelectElement;
+
+    expect(mode.tagName).toBe('SELECT');
+    expect(Array.from(mode.options, (o) => o.value)).toEqual(['', 'open_loop', 'closed_speed']);
+    await fireEvent.change(mode, { target: { value: 'closed_speed' } });
+    await fireEvent.click(executeButtons()[0]);
+
+    expect(await screen.findByText(/^Accepted at /)).toBeInTheDocument();
+    expect(calls).toEqual([
+      { provider_id: 'bread0', device_id: 'dcmt0', function_id: 3, args: { mode: { type: 'string', string: 'closed_speed' } } },
+    ]);
+  });
+
+  it('sends nothing while a required select is left unchosen', async () => {
+    const { calls } = renderWithEnum();
+    await screen.findByLabelText(/^mode/);
+    await fireEvent.click(executeButtons()[0]);
+
+    expect(await screen.findByText('Error: Missing required argument: mode')).toBeInTheDocument();
+    expect(calls).toEqual([]);
+  });
+
+  it('refuses a choice the restarted runtime no longer allows, before the POST', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { calls, rt } = renderWithEnum();
+    await fireEvent.change(await screen.findByLabelText(/^mode/), { target: { value: 'closed_speed' } });
+
+    rt.running = false;
+    await vi.advanceTimersByTimeAsync(5000);
+    await waitFor(() => expect(screen.queryByLabelText(/^mode/)).not.toBeInTheDocument());
+    const narrowed = structuredClone(ENUM_CAPS);
+    narrowed.capabilities.functions[0].args.mode.allowed_values = ['open_loop'];
+    rt.caps = narrowed;
+    rt.running = true;
+    await vi.advanceTimersByTimeAsync(5000);
+    await screen.findByLabelText(/^mode/);
+    await fireEvent.click(executeButtons()[0]);
+
+    expect(
+      await screen.findByText("Error: mode must be one of open_loop, not 'closed_speed'"),
+    ).toBeInTheDocument();
+    expect(calls).toEqual([]);
+  });
+
+  it('clears the select on a software stop', async () => {
+    renderWithEnum();
+    const mode = (await screen.findByLabelText(/^mode/)) as HTMLSelectElement;
+    await fireEvent.change(mode, { target: { value: 'open_loop' } });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'SOFTWARE STOP' }));
+
+    await waitFor(() => expect(mode.value).toBe(''));
+  });
+
+  it('keeps a text box for a string arg with no allowed_values', async () => {
+    renderOperate(() => jsonResponse(200, { status: { code: 'OK' } }));
+
+    expect((await screen.findByLabelText(/^mode/)).tagName).toBe('INPUT');
+  });
+});

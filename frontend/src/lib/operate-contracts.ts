@@ -149,6 +149,24 @@ export function normalizeArgSpec(arg: UnknownRecord, fallback = ""): FunctionArg
   };
 }
 
+/**
+ * The values a string arg is limited to, or [] when it is unconstrained. The
+ * runtime emits `allowed_values` only on string args and refuses a call
+ * outside them (anolis#467).
+ */
+export function argAllowedValues(arg: FunctionArgSpec): string[] {
+  if (arg.type !== "string" || !Array.isArray(arg.allowed_values)) return [];
+  return arg.allowed_values.map(String);
+}
+
+/** Throws when `value` is outside the arg's allowed values (wb#576). */
+export function checkAllowedValue(arg: FunctionArgSpec, value: string): void {
+  const allowed = argAllowedValues(arg);
+  if (allowed.length > 0 && !allowed.includes(value)) {
+    throw new Error(`${arg.name} must be one of ${allowed.join(", ")}, not '${value}'`);
+  }
+}
+
 export function extractDeviceStateValues(payload: unknown): DeviceStateValue[] {
   return asArray(asObject(payload).values).map((s) => {
     const src = asObject(s);

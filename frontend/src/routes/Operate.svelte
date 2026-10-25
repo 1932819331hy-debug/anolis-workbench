@@ -25,6 +25,8 @@
     type SavedLaunch,
   } from "../lib/canonical";
   import {
+    argAllowedValues,
+    checkAllowedValue,
     coerceParameterValue,
     deriveOperateAvailability,
     DISPATCHABLE_COVERAGE_SINCE,
@@ -653,6 +655,7 @@
         args[argDef.name] = { type: "bytes", base64: value };
         continue;
       }
+      checkAllowedValue(argDef, value);
       args[argDef.name] = { type: "string", string: value };
     }
     return args;
@@ -1307,6 +1310,18 @@
                           onchange={(e: Event) =>
                             setFuncArg(selectedKey, func, ai, inputTarget(e).checked)}
                         />
+                      {:else if argAllowedValues(arg).length > 0}
+                        <select
+                          id="fn-{fbKey}-{ai}"
+                          value={getFuncFormData(selectedKey, func)[`arg_${ai}`] ?? ""}
+                          onchange={(e: Event) =>
+                            setFuncArg(selectedKey, func, ai, selectTarget(e).value)}
+                        >
+                          <option value="">Choose…</option>
+                          {#each argAllowedValues(arg) as av (av)}
+                            <option value={av}>{av}</option>
+                          {/each}
+                        </select>
                       {:else if arg.type === "double"}
                         <input
                           id="fn-{fbKey}-{ai}"

@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  argAllowedValues,
+  checkAllowedValue,
   coerceParameterValue,
   deriveOperateAvailability,
   extractAutomationStatus,
@@ -717,5 +719,28 @@ describe("summarizeRuntimeHealth (wb#557)", () => {
     expect(summarizeRuntimeHealth(null, estop(true), null).label).toBe("UNAVAILABLE");
     const failed = extractRuntimeStatus({ status: { code: "UNAVAILABLE" }, providers: [] });
     expect(summarizeRuntimeHealth(failed, null, null).label).toBe("UNAVAILABLE");
+  });
+});
+
+describe("allowed_values on function args (wb#576)", () => {
+  const mode = { name: "mode", type: "string", required: true, allowed_values: ["open_loop", "closed_speed"] };
+
+  it("accepts a value in the set and refuses one outside it, case included", () => {
+    expect(() => checkAllowedValue(mode, "closed_speed")).not.toThrow();
+    expect(() => checkAllowedValue(mode, "Open_Loop")).toThrow(
+      "mode must be one of open_loop, closed_speed, not 'Open_Loop'",
+    );
+  });
+
+  it("leaves an unconstrained string, and a non-string arg, unchecked", () => {
+    expect(() => checkAllowedValue({ name: "label", type: "string", required: false }, "x")).not.toThrow();
+    const count = { name: "n", type: "int64", required: true, allowed_values: ["1"] };
+    expect(argAllowedValues(count)).toEqual([]);
+    expect(() => checkAllowedValue(count, "2")).not.toThrow();
+  });
+
+  it("reads allowed_values through normalizeArgSpec", () => {
+    const arg = normalizeArgSpec({ type: "string", allowed_values: ["a", "b"] }, "mode");
+    expect(argAllowedValues(arg)).toEqual(["a", "b"]);
   });
 });
