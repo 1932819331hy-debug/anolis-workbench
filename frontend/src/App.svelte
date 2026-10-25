@@ -162,7 +162,8 @@
       projectName = null;
       system = null;
       workspace = null;
-      currentPath = "/";
+      // "/" or "/fleet": the shell renders Fleet only when currentPath says so (wb#555).
+      currentPath = route.path;
       return true;
     }
 
