@@ -1204,18 +1204,19 @@ def test_health_lines_lead_with_the_start_line(start: str) -> None:
     assert deploy.health_lines(output) == [start, "✓ health: runtime responding (v0.1.51)"]
 
 
-# The startup safe-state lines anolishq/anolis#471 asks phase_health to print.
-# No install.sh prints them yet; these pin that they reach the deploy result
-# when one does.
+# The startup safe-state lines phase_health prints (anolishq/anolis#473): the
+# achieved line names the rung, and a run that did not happen is a skip line.
 def test_health_lines_carry_the_startup_safe_state() -> None:
-    achieved = "\x1b[0;32m✓ health: startup safe state achieved (7 calls)\x1b[0m\n"
+    achieved = "\x1b[0;32m✓ health: startup safe state achieved (hooks)\x1b[0m\n"
+    not_run = "\x1b[0;33m→ health: startup safe state not run (on_startup: leave)\x1b[0m\n  Hostname:  pi-g1\n"
     not_achieved = (
         "\x1b[1;33m⚠ health: startup safe state NOT achieved\x1b[0m\n"
         "    bread0/dcmt0 set_mode: SET command refused: WATCHDOG_TRIP\n"
         "    bread0/rlht0 set_mode: skipped, device absent at startup\n"
         "  Hostname:  pi-g1\n"
     )
-    assert deploy.health_lines(achieved) == ["✓ health: startup safe state achieved (7 calls)"]
+    assert deploy.health_lines(achieved) == ["✓ health: startup safe state achieved (hooks)"]
+    assert deploy.health_lines(not_run) == ["→ health: startup safe state not run (on_startup: leave)"]
     assert deploy.health_lines(not_achieved) == [
         "⚠ health: startup safe state NOT achieved",
         "    bread0/dcmt0 set_mode: SET command refused: WATCHDOG_TRIP",
