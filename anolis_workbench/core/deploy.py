@@ -433,15 +433,17 @@ def observability_lines(stdout: str) -> list[str]:
     return _marked_lines(stdout, lambda line: any(mark in line for mark in _OBSERVABILITY_MARKS))
 
 
-# install.sh's phase_health lines: a status glyph, then "health:".
-_HEALTH_RE = re.compile(r"^\S+ health:")
+# install.sh's phase_start and phase_health lines: a status glyph, then
+# "start:" or "health:". phase_start restarts the runtime on every install, so
+# its line is what says this deploy restarted it (#556).
+_HEALTH_RE = re.compile(r"^\S+ (?:start|health):")
 
 
 def health_lines(stdout: str) -> list[str]:
-    """install.sh's health lines (runtime, run registry, provider liveness),
-    ANSI stripped, each with the indented detail that follows it. A provider
-    that is not running is a warning and install.sh still exits 0, so these
-    lines are the only place it shows."""
+    """install.sh's start and health lines (runtime restart, runtime, run
+    registry, provider liveness), ANSI stripped, each with the indented detail
+    that follows it. A provider that is not running is a warning and
+    install.sh still exits 0, so these lines are the only place it shows."""
     return _marked_lines(stdout, lambda line: _HEALTH_RE.match(line) is not None)
 
 

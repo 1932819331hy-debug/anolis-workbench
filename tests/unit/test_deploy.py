@@ -1035,6 +1035,41 @@ def test_health_lines_are_install_sh_health_report(name: str, expected: list[str
     assert deploy.health_lines(_install_sh_output(name)) == expected
 
 
+# phase_start runs just before phase_health and restarts the runtime on every
+# install (anolis tools/install.sh:1613-1624 at v0.1.51), so its line says
+# whether this deploy restarted it (#556).
+@pytest.mark.parametrize(
+    "start",
+    [
+        "✓ start: anolis-runtime restarted",
+        "⚠ start: failed to restart anolis-runtime",
+        "→ start: --no-start specified",
+    ],
+)
+def test_health_lines_lead_with_the_start_line(start: str) -> None:
+    output = f"\x1b[0;32m{start}\x1b[0m\n\x1b[0;32m✓ health: runtime responding (v0.1.51)\x1b[0m\n  Hostname:  pi-g1\n"
+    assert deploy.health_lines(output) == [start, "✓ health: runtime responding (v0.1.51)"]
+
+
+# The startup safe-state lines anolishq/anolis#471 asks phase_health to print.
+# No install.sh prints them yet; these pin that they reach the deploy result
+# when one does.
+def test_health_lines_carry_the_startup_safe_state() -> None:
+    achieved = "\x1b[0;32m✓ health: startup safe state achieved (7 calls)\x1b[0m\n"
+    not_achieved = (
+        "\x1b[1;33m⚠ health: startup safe state NOT achieved\x1b[0m\n"
+        "    bread0/dcmt0 set_mode: SET command refused: WATCHDOG_TRIP\n"
+        "    bread0/rlht0 set_mode: skipped, device absent at startup\n"
+        "  Hostname:  pi-g1\n"
+    )
+    assert deploy.health_lines(achieved) == ["✓ health: startup safe state achieved (7 calls)"]
+    assert deploy.health_lines(not_achieved) == [
+        "⚠ health: startup safe state NOT achieved",
+        "    bread0/dcmt0 set_mode: SET command refused: WATCHDOG_TRIP",
+        "    bread0/rlht0 set_mode: skipped, device absent at startup",
+    ]
+
+
 def test_health_and_observability_lines_do_not_overlap() -> None:
     output = _install_sh_output("pi-loopback")
     assert deploy.health_lines(output) == ["✓ health: runtime responding (v0.1.45)"]
