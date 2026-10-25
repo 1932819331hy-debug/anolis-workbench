@@ -11,6 +11,7 @@ interim remote-operate surface until the device-registry UX
 from __future__ import annotations
 
 import io
+import urllib.error
 import urllib.request
 from typing import Any
 
@@ -374,3 +375,131 @@ def test_the_credential_token_never_goes_to_another_host(base: str, credential: 
 def test_the_credential_token_goes_to_this_machine(base: str, credential: None, monkeypatch) -> None:
     monkeypatch.delenv("ANOLIS_WORKBENCH_RUNTIME_URL", raising=False)
     assert operate.runtime_token(base) == _CRED_TOKEN
+
+
+# ---------------------------------------------------------------------------
+# A software stop goes to the last resolved target without reading a project
+# (#612).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _no_remembered_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(operate, "_last_target", None)
+
+
+def _running_on(monkeypatch: pytest.MonkeyPatch, port: int) -> None:
+    monkeypatch.delenv("ANOLIS_WORKBENCH_RUNTIME_URL", raising=False)
+    monkeypatch.setattr(operate.launcher_module, "get_status", lambda: {"running": True, "active_project": "rig"})
+    monkeypatch.setattr(operate.projects_module, "get_project", lambda name: {})
+    monkeypatch.setattr(
+        operate.launcher_module, "active_runtime_config", lambda system: {"http": {"bind": "127.0.0.1", "port": port}}
+    )
+
+
+def _no_lookup(*_args: Any) -> Any:
+    raise AssertionError("the stop route looked the runtime up")
+
+
+def _forbid_lookups(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(operate.launcher_module, "get_status", _no_lookup)
+    monkeypatch.setattr(operate.projects_module, "get_project", _no_lookup)
+    monkeypatch.setattr(operate.projects_module.canonical, "read_project", _no_lookup)
+
+
+def _recording_urlopen(monkeypatch: pytest.MonkeyPatch, refuse: tuple[str, ...] = ()) -> list[str]:
+    urls: list[str] = []
+
+    def fake_urlopen(req: urllib.request.Request, timeout: float | None = None):
+        urls.append(req.full_url)
+        if req.full_url.startswith(refuse):
+            raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+        return _FakeResponse()
+
+    monkeypatch.setattr(operate.urllib.request, "urlopen", fake_urlopen)
+    return urls
+
+
+def test_a_stop_reads_no_project(monkeypatch) -> None:
+    _running_on(monkeypatch, 8085)
+    assert operate._runtime_base()[0] == "http://127.0.0.1:8085"  # an Operate poll
+    _forbid_lookups(monkeypatch)
+    urls = _recording_urlopen(monkeypatch)
+
+    handler = _FakeHandler()
+    operate.proxy_runtime(handler, "POST", "/v0/estop")
+
+    assert urls == ["http://127.0.0.1:8085/v0/estop"]
+    assert handler.sent_status == 200
+
+
+def test_a_stop_before_any_poll_resolves_the_target(monkeypatch) -> None:
+    _running_on(monkeypatch, 8085)
+    urls = _recording_urlopen(monkeypatch)
+
+    operate.proxy_runtime(_FakeHandler(), "POST", "/v0/estop")
+
+    assert urls == ["http://127.0.0.1:8085/v0/estop"]
+
+
+def test_a_stop_resolves_afresh_when_the_last_target_is_gone(monkeypatch) -> None:
+    _running_on(monkeypatch, 8085)
+    operate._runtime_base()
+    _running_on(monkeypatch, 8086)  # another project now runs
+    urls = _recording_urlopen(monkeypatch, refuse=("http://127.0.0.1:8085",))
+
+    handler = _FakeHandler()
+    operate.proxy_runtime(handler, "POST", "/v0/estop")
+
+    assert urls == ["http://127.0.0.1:8085/v0/estop", "http://127.0.0.1:8086/v0/estop"]
+    assert handler.sent_status == 200
+
+
+def test_a_stop_with_nothing_running_reports_it(monkeypatch) -> None:
+    _running_on(monkeypatch, 8085)
+    operate._runtime_base()
+    monkeypatch.setattr(operate.launcher_module, "get_status", lambda: {"running": False})
+    urls = _recording_urlopen(monkeypatch, refuse=("http://127.0.0.1:8085",))
+
+    handler = _FakeHandler()
+    operate.proxy_runtime(handler, "POST", "/v0/estop")
+
+    assert urls == ["http://127.0.0.1:8085/v0/estop"]
+    assert handler.json_payloads == [(503, {"error": "Runtime is not running"})]
+
+
+def test_a_stop_at_an_unchanged_target_that_refuses_is_a_502(monkeypatch) -> None:
+    _running_on(monkeypatch, 8085)
+    operate._runtime_base()
+    urls = _recording_urlopen(monkeypatch, refuse=("http://127.0.0.1:8085",))
+
+    handler = _FakeHandler()
+    operate.proxy_runtime(handler, "POST", "/v0/estop")
+
+    assert urls == ["http://127.0.0.1:8085/v0/estop"]
+    assert [status for status, _ in handler.json_payloads] == [502]
+
+
+def test_a_stop_follows_the_override(monkeypatch) -> None:
+    _running_on(monkeypatch, 8085)
+    operate._runtime_base()
+    monkeypatch.setenv("ANOLIS_WORKBENCH_RUNTIME_URL", "http://192.0.2.10:8080")
+    urls = _recording_urlopen(monkeypatch)
+
+    operate.proxy_runtime(_FakeHandler(), "POST", "/v0/estop")
+
+    assert urls == ["http://192.0.2.10:8080/v0/estop"]
+
+
+@pytest.mark.parametrize(("method", "path"), [("GET", "/v0/runtime/status"), ("POST", "/v0/estop/clear")])
+def test_other_requests_resolve_the_target_each_time(method: str, path: str, monkeypatch) -> None:
+    _running_on(monkeypatch, 8085)
+    operate._runtime_base()
+    monkeypatch.setattr(operate.launcher_module, "get_status", lambda: {"running": False})
+    urls = _recording_urlopen(monkeypatch)
+
+    handler = _FakeHandler()
+    operate.proxy_runtime(handler, method, path)
+
+    assert urls == []
+    assert handler.json_payloads == [(503, {"error": "Runtime is not running"})]

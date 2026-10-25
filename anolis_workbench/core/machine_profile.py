@@ -40,6 +40,17 @@ _PROFILE_SCHEMA_CACHE: dict[str, Any] | None = None
 _PROJECTS_PATH_RE = re.compile(r"\.\./anolis-projects/projects/([^/\s\"']+)/")
 
 
+# libyaml's safe loader where PyYAML was built with it. The pure-Python one
+# took most of a second per project read on a Pi (#612); both build the
+# document with the same SafeConstructor.
+_SAFE_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+def safe_load(text: str) -> Any:
+    """yaml.safe_load, through libyaml when it is available."""
+    return yaml.load(text, Loader=_SAFE_LOADER)
+
+
 class ProfileError(RuntimeError):
     """Raised when a machine-profile directory cannot be read at all."""
 
@@ -135,7 +146,7 @@ def load_profile(source_dir: Path) -> dict[str, Any]:
     if not profile_path.is_file():
         raise ProfileError(f"No {PROFILE_FILENAME} in {source_dir}")
     try:
-        payload = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
+        payload = safe_load(profile_path.read_text(encoding="utf-8"))
     except (yaml.YAMLError, OSError, UnicodeDecodeError) as exc:
         raise ProfileError(f"Failed reading {profile_path}: {exc}") from exc
     if not isinstance(payload, dict):

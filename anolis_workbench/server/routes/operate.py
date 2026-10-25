@@ -83,6 +83,12 @@ def runtime_token(target_base: str) -> str:
     return workbench_service.read_runtime_token()
 
 
+# The target _runtime_base last resolved. A software stop goes straight to
+# it: resolving afresh reads every project, which on a Pi kept the stop
+# waiting behind Operate's polls for more than a minute (#612).
+_last_target: str | None = None
+
+
 def _runtime_base() -> tuple[str | None, str | None, int]:
     # Remote override: point the operate proxy at an already-provisioned
     # device instead of the locally-launched runtime. Pairs with
@@ -126,21 +132,12 @@ def _runtime_base() -> tuple[str | None, str | None, int]:
     if not isinstance(port, int) or isinstance(port, bool):
         return None, "Runtime port is invalid", 500
 
-    return f"http://{host}:{port}", None, 200
+    global _last_target
+    _last_target = f"http://{host}:{port}"
+    return _last_target, None, 200
 
 
-def proxy_runtime(handler, method: str, raw_path: str) -> None:
-    runtime_base, error, status_code = _runtime_base()
-    if runtime_base is None:
-        handler._json(status_code, {"error": error or "Runtime unavailable"})
-        return
-
-    target_url = f"{runtime_base}{raw_path}"
-    body: bytes | None = None
-    content_length = int(handler.headers.get("Content-Length", "0") or "0")
-    if content_length > 0:
-        body = handler.rfile.read(content_length)
-
+def _open(runtime_base: str, method: str, raw_path: str, body: bytes | None, handler, wants_stream: bool):
     headers: dict[str, str] = {}
     for key in ("Content-Type", "Accept", "Last-Event-ID"):
         value = handler.headers.get(key)
@@ -153,14 +150,48 @@ def proxy_runtime(handler, method: str, raw_path: str) -> None:
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
-    req = urllib.request.Request(target_url, data=body, headers=headers, method=method)
+    req = urllib.request.Request(f"{runtime_base}{raw_path}", data=body, headers=headers, method=method)
+    if wants_stream:
+        return urllib.request.urlopen(req)
+    return urllib.request.urlopen(req, timeout=15)
+
+
+def proxy_runtime(handler, method: str, raw_path: str) -> None:
+    is_stop = method == "POST" and raw_path.split("?")[0] == "/v0/estop"
+    remembered = _last_target if is_stop and not runtime_url_override() else None
+    if remembered is not None:
+        runtime_base = remembered
+    else:
+        resolved, error, status_code = _runtime_base()
+        if resolved is None:
+            handler._json(status_code, {"error": error or "Runtime unavailable"})
+            return
+        runtime_base = resolved
+
+    body: bytes | None = None
+    content_length = int(handler.headers.get("Content-Length", "0") or "0")
+    if content_length > 0:
+        body = handler.rfile.read(content_length)
+
     wants_stream = raw_path.split("?")[0] == "/v0/events"
 
     try:
-        if wants_stream:
-            response_ctx = urllib.request.urlopen(req)
-        else:
-            response_ctx = urllib.request.urlopen(req, timeout=15)
+        try:
+            response_ctx = _open(runtime_base, method, raw_path, body, handler, wants_stream)
+        except urllib.error.HTTPError:
+            raise
+        except urllib.error.URLError:
+            if remembered is None:
+                raise
+            # Nothing answers at the remembered target: the runtime stopped,
+            # or another project's now runs. Resolve it as any request would.
+            resolved, error, status_code = _runtime_base()
+            if resolved is None:
+                handler._json(status_code, {"error": error or "Runtime unavailable"})
+                return
+            if resolved == remembered:
+                raise
+            response_ctx = _open(resolved, method, raw_path, body, handler, wants_stream)
 
         with response_ctx as response:
             handler.send_response(int(response.status))

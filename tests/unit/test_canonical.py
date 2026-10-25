@@ -10,6 +10,7 @@ tests are the thing that notices.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
 
@@ -684,3 +685,99 @@ def test_retiring_an_orphan_does_not_follow_a_symlink_out_of_the_project(tmp_pat
     canonical.write_project(pdir, _document())
 
     assert outside.read_text(encoding="utf-8") == "mine\n"
+
+
+# ---------------------------------------------------------------------------
+# read_project reuses its parse while the files are unchanged (#612)
+# ---------------------------------------------------------------------------
+
+
+def _no_parse(*_args: object) -> object:
+    raise AssertionError("read_project parsed YAML for an unchanged project")
+
+
+def test_an_unchanged_project_is_not_parsed_again(tmp_path: pathlib.Path, monkeypatch) -> None:
+    pdir = tmp_path / "rig-a"
+    canonical.write_project(pdir, _document())
+    first = canonical.read_project(pdir)
+
+    monkeypatch.setattr(machine_profile, "safe_load", _no_parse)
+    assert canonical.read_project(pdir) == first
+
+
+def test_each_read_returns_its_own_copy(tmp_path: pathlib.Path) -> None:
+    pdir = tmp_path / "rig-a"
+    canonical.write_project(pdir, _document())
+
+    for _ in range(2):  # the read that parses, then one that reuses the parse
+        canonical.read_project(pdir)["variants"][canonical.MANUAL_VARIANT]["http"]["port"] = 9999
+
+    assert canonical.read_project(pdir)["variants"][canonical.MANUAL_VARIANT]["http"]["port"] == 8080
+
+
+def test_an_edited_file_is_read_again(tmp_path: pathlib.Path) -> None:
+    pdir = tmp_path / "rig-a"
+    canonical.write_project(pdir, _document())
+    canonical.read_project(pdir)
+
+    variant = pdir / canonical.variant_relpath(canonical.MANUAL_VARIANT)
+    variant.write_text(variant.read_text(encoding="utf-8").replace("port: 8080", "port: 18080"), encoding="utf-8")
+
+    assert canonical.read_project(pdir)["variants"][canonical.MANUAL_VARIANT]["http"]["port"] == 18080
+
+
+def test_a_same_size_edit_is_read_again_when_its_mtime_moves(tmp_path: pathlib.Path) -> None:
+    """An in-place rewrite keeps the inode, and this one keeps the size."""
+    pdir = tmp_path / "rig-a"
+    canonical.write_project(pdir, _document())
+    canonical.read_project(pdir)
+
+    variant = pdir / canonical.variant_relpath(canonical.MANUAL_VARIANT)
+    before = variant.stat()
+    variant.write_text(variant.read_text(encoding="utf-8").replace("port: 8080", "port: 8081"), encoding="utf-8")
+    os.utime(variant, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000))
+    assert variant.stat().st_ino == before.st_ino and variant.stat().st_size == before.st_size
+
+    assert canonical.read_project(pdir)["variants"][canonical.MANUAL_VARIANT]["http"]["port"] == 8081
+
+
+def test_a_save_is_read_again(tmp_path: pathlib.Path) -> None:
+    pdir = tmp_path / "rig-a"
+    canonical.write_project(pdir, _document())
+    doc = _authored(pdir)
+    doc["variants"][canonical.MANUAL_VARIANT]["http"]["port"] = 8081
+    canonical.write_project(pdir, doc)
+
+    assert canonical.read_project(pdir)["variants"][canonical.MANUAL_VARIANT]["http"]["port"] == 8081
+
+
+def test_a_file_that_appears_is_read(tmp_path: pathlib.Path) -> None:
+    """A referenced file that was absent is part of what the parse depended on."""
+    pdir = tmp_path / "rig-a"
+    canonical.write_project(pdir, _document())
+    config = pdir / canonical.provider_config_relpath("bread", "bread0")
+    content = config.read_text(encoding="utf-8")
+    config.unlink()
+    assert canonical.read_project(pdir)["providers"]["bread0"]["config"] == {}
+
+    config.write_text(content, encoding="utf-8")
+
+    assert canonical.read_project(pdir)["providers"]["bread0"]["config"] == yaml.safe_load(content)
+
+
+def test_a_changed_sidecar_is_read_again(tmp_path: pathlib.Path) -> None:
+    pdir = tmp_path / "rig-a"
+    canonical.write_project(pdir, _document())
+    assert canonical.read_project(pdir)["authored"] is False
+
+    canonical.write_sidecar(
+        pdir,
+        canonical.default_sidecar(name="rig-a", created="2026-01-01T00:00:00Z", machine_id="rig-a"),
+    )
+
+    assert canonical.read_project(pdir)["authored"] is True
+
+
+def test_the_libyaml_loader_is_still_safe() -> None:
+    with pytest.raises(yaml.YAMLError):
+        machine_profile.safe_load("!!python/object/apply:builtins.len [[1]]\n")

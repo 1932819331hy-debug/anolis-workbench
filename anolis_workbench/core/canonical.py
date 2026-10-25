@@ -16,6 +16,7 @@ serve both `install.sh` deploys and local dev-launch.
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import re
@@ -463,12 +464,47 @@ def host_paths(sidecar: dict[str, Any] | None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+# project dir -> (the stamp of every file the read consulted, the document).
+# Every proxied Operate request reads the running project, and re-parsing it
+# each time made a software stop wait more than a minute on a Pi (#612).
+_READ_CACHE: dict[str, tuple[list[tuple[Path, tuple[int, int, int] | None]], dict[str, Any]]] = {}
+
+
+def _file_stamp(path: Path) -> tuple[int, int, int] | None:
+    """What changes when a file is rewritten, or None when it is absent. The
+    inode catches an atomic replace (_write_text_atomic) whose mtime and
+    size match the old file's."""
+    try:
+        stat = path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+
+
 def read_project(project_dir: Path) -> dict[str, Any]:
     """The whole canonical project as one document (parsed files, not a model).
 
     Because this carries the FULL parsed documents rather than a workbench
     model of them, keys the workbench does not understand round-trip intact.
+
+    The parse is reused while every file it read, or found absent, is
+    unchanged; each call returns its own copy.
     """
+    key = str(project_dir)
+    cached = _READ_CACHE.get(key)
+    if cached is not None and all(_file_stamp(path) == stamp for path, stamp in cached[0]):
+        return copy.deepcopy(cached[1])
+
+    # Each stamp is taken before its file is read, so a write in between
+    # leaves a stale stamp and the next call reads again.
+    stamps: list[tuple[Path, tuple[int, int, int] | None]] = []
+
+    def consult(path: Path) -> Path:
+        stamps.append((path, _file_stamp(path)))
+        return path
+
+    consult(project_dir / machine_profile.PROFILE_FILENAME)
+    consult(project_dir / machine_profile.SIDECAR_NAME)
     profile = machine_profile.load_profile(project_dir)
     sidecar = machine_profile.read_sidecar(project_dir) or {}
 
@@ -478,7 +514,7 @@ def read_project(project_dir: Path) -> dict[str, Any]:
         for variant, rel in runtime_profiles.items():
             if not isinstance(rel, str):
                 continue
-            path = project_dir / rel
+            path = consult(project_dir / rel)
             if path.is_file():
                 variants[variant] = _load_yaml(path)
 
@@ -489,11 +525,11 @@ def read_project(project_dir: Path) -> dict[str, Any]:
         for pid, entry in profile_providers.items():
             rel = entry.get("config") if isinstance(entry, dict) else None
             config: Any = {}
-            if isinstance(rel, str) and (project_dir / rel).is_file():
+            if isinstance(rel, str) and consult(project_dir / rel).is_file():
                 config = _load_yaml(project_dir / rel)
             providers[pid] = {"kind": kinds.get(pid), "config": config}
 
-    return {
+    document: dict[str, Any] = {
         "format": "machine-profile",
         "authored": is_authored(sidecar),
         "meta": sidecar.get("meta") if isinstance(sidecar.get("meta"), dict) else {},
@@ -504,6 +540,8 @@ def read_project(project_dir: Path) -> dict[str, Any]:
         "launch": sidecar.get("launch") if isinstance(sidecar.get("launch"), dict) else {},
         "warnings": sidecar.get("warnings") if isinstance(sidecar.get("warnings"), list) else [],
     }
+    _READ_CACHE[key] = (stamps, document)
+    return copy.deepcopy(document)
 
 
 def _checked_target(project_dir: Path, rel: Any, label: str) -> Path:
@@ -657,7 +695,7 @@ def _prune_orphans(
 
 def _load_yaml(path: Path) -> Any:
     try:
-        return yaml.safe_load(path.read_text(encoding="utf-8"))
+        return machine_profile.safe_load(path.read_text(encoding="utf-8"))
     except (yaml.YAMLError, OSError, UnicodeDecodeError) as exc:
         raise CanonicalError(f"Failed reading {path}: {exc}") from exc
 
