@@ -125,6 +125,12 @@ body {
   border-color: #4b5563;
 }
 
+/* No project open: the tabs do nothing, so they must not look clickable (#569). */
+.tab-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
 .runtime-indicator {
   justify-self: end;
   border-radius: 999px;

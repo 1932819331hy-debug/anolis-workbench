@@ -337,6 +337,9 @@
         class="tab-btn"
         class:active={workspace === ws && Boolean(projectName)}
         disabled={!projectName}
+        title={projectName
+          ? undefined
+          : `Open a project to use ${ws.charAt(0).toUpperCase() + ws.slice(1)}.`}
         onclick={() => onTabClick(ws)}>{ws.charAt(0).toUpperCase() + ws.slice(1)}</button
       >
     {/each}
