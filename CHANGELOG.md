@@ -13,6 +13,50 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-24
+
+### Fixed
+
+- Operate no longer leaves `/v0/events` streams open (#551, #583). A status
+  poll that was still in flight when Operate stopped or unmounted opened a
+  new stream that nothing closed, and six of them took every browser
+  connection to the workbench.
+- Selecting another device while a state or capabilities request was in
+  flight no longer files the first device's reply, and its function forms,
+  under the second (#552, #584).
+- Operate's Runtime Status badge reflects the machine, not the status
+  request (#557, #585). It reads ATTENTION, with its reasons, while the
+  software stop is latched, the startup safe state was not achieved, a
+  provider is not AVAILABLE or a device is latched after going unreachable.
+  UNAVAILABLE still means the status could not be read.
+- Removing the automation variant in Compose also removes the providers
+  only it ran (#554, #586). They stayed in the draft with no form showing
+  them, and Save failed on their missing fields.
+- The deploy result shows install.sh's runtime restart line (part of #556,
+  #587). It will also show the startup safe state once install.sh reports
+  it (anolishq/anolis#471).
+- The software stop card shows one state (#553, #588). It takes the latch
+  from the stop or clear reply instead of waiting for the next status read,
+  and it is sticky on a long Operate page. The stop button is offered
+  before the runtime's status loads. On another project's page the stop
+  stays, a latch on the running runtime shows above it, re-read every 5 s,
+  with a link to that project's Operate view, where it is cleared.
+- The Fleet Dashboard renders at `/fleet`, from Home's button and on a
+  direct load (#555, #589).
+
+### Changed
+
+- With no runtime running for the project, Operate names the two ways to
+  reach a runtime on another machine: the workbench on the device over an
+  ssh tunnel, or a tunnelled runtime port with
+  `ANOLIS_WORKBENCH_RUNTIME_URL`, plus `ANOLIS_WORKBENCH_RUNTIME_TOKEN` when
+  the runtime requires auth (#590, refs #510).
+- The vendored anolis-provider-bread config schema is 0.8.1's (#539). It
+  differs from 0.8.0's only in its version.
+- Dependencies: setuptools 84.1.0 (#547), happy-dom 21.0.4 (#546), vite
+  8.3.5 (#548), `@tauri-apps/cli` 2.12.4 (#549), and CI's setup-uv action
+  10.3.1 (#550).
+
 ## [0.19.0] - 2026-10-23
 
 ### Added
