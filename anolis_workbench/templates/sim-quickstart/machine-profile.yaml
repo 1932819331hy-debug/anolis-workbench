@@ -17,7 +17,7 @@ compatibility:
 components:
   runtime:
     repo: anolishq/anolis
-    version: 0.1.51
+    version: 0.1.52
   providers:
     sim:
       repo: anolishq/anolis-provider-sim
