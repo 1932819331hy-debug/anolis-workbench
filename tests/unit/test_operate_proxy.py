@@ -535,9 +535,11 @@ class _ChunkedEvents(http.server.BaseHTTPRequestHandler):
                 if seq is None:
                     return
                 event = f'event: state_update\ndata: {{"seq": {seq}}}\n\n'.encode()
+                # Recorded before the write: the client can read the event
+                # before this thread runs again.
+                state["sent"].append(seq)
                 self.wfile.write(f"{len(event):x}\r\n".encode() + event + b"\r\n")
                 self.wfile.flush()
-                state["sent"].append(seq)
                 # Has the proxy closed its end? A peek at a closed socket is b"".
                 time.sleep(0.05)
                 self.connection.setblocking(False)
