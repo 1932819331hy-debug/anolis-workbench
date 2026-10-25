@@ -375,20 +375,24 @@
       {onProjectsRefreshed}
     />
   {:else if workspace === "compose"}
-    <Compose
-      {projectName}
-      {system}
-      {providerSchemas}
-      {runtimeStatus}
-      bind:editingVariant
-      onDirty={() => {
-        dirty = true;
-      }}
-      onSaved={() => {
-        dirty = false;
-        saved = savedLaunch(system);
-      }}
-    />
+    <!-- Remount per project: a failed save's errors belong to the project
+         they were reported for (wb#561). -->
+    {#key projectName}
+      <Compose
+        {projectName}
+        {system}
+        {providerSchemas}
+        {runtimeStatus}
+        bind:editingVariant
+        onDirty={() => {
+          dirty = true;
+        }}
+        onSaved={() => {
+          dirty = false;
+          saved = savedLaunch(system);
+        }}
+      />
+    {/key}
   {:else if workspace === "commission"}
     <!-- Remount per project: a preflight result, or one still in flight,
          belongs to the project it ran for and must not gate another's Launch. -->
