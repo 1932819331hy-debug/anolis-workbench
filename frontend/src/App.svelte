@@ -32,6 +32,10 @@
   let providerSchemas = $state<ProviderSchemasResponse | null>(null);
   let templates = $state<TemplateSummary[]>([]);
   let projects = $state<ProjectSummary[]>([]);
+  // Whether the first /api/projects and /api/status replies have settled: until
+  // then the shell says it is loading rather than "No projects" or "Stopped" (#568).
+  let projectsLoaded = $state<boolean>(false);
+  let statusSettled = $state<boolean>(false);
   let runtimeStatus = $state<RuntimeStatus | null>(null);
   let showOnboarding = $state<boolean>(false);
   let projectName = $state<string | null>(null);
@@ -200,6 +204,8 @@
       }
     } catch {
       // non-fatal; keep prior status
+    } finally {
+      statusSettled = true;
     }
   }
 
@@ -249,7 +255,10 @@
           .then((p) => {
             projects = p;
           })
-          .catch(() => {}),
+          .catch(() => {})
+          .finally(() => {
+            projectsLoaded = true;
+          }),
         refreshWorkbenchConfig(),
         refreshStatus(),
       ]);
@@ -349,9 +358,13 @@
     id="runtime-indicator"
     class="runtime-indicator"
     class:running={running && Boolean(runningProject)}
-    class:stopped={!(running && Boolean(runningProject))}
+    class:stopped={statusSettled && !(running && Boolean(runningProject))}
   >
-    {running && runningProject ? `Running: ${runningProject}` : "Stopped"}
+    {running && runningProject
+      ? `Running: ${runningProject}`
+      : statusSettled
+        ? "Stopped"
+        : "Checking runtime…"}
   </div>
 </header>
 
@@ -374,6 +387,7 @@
   {:else if !projectName}
     <Home
       {projects}
+      {projectsLoaded}
       {templates}
       {runtimeStatus}
       onNavigate={(path) => void navigateTo(path, { bypassGuards: true })}

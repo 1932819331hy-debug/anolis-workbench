@@ -10,12 +10,15 @@
 
   let {
     projects,
+    projectsLoaded = true,
     templates,
     runtimeStatus = null,
     onNavigate,
     onProjectsRefreshed,
   }: {
     projects: ProjectSummary[];
+    /** False until the project list has been read once (#568). */
+    projectsLoaded?: boolean;
     templates: TemplateSummary[];
     runtimeStatus?: RuntimeStatus | null;
     onNavigate: (path: string) => void;
@@ -240,7 +243,11 @@
   <div class="home-grid">
     <div class="home-card">
       <h2>Existing Projects</h2>
-      {#if projects.length === 0}
+      {#if !projectsLoaded}
+        <ul class="home-project-list">
+          <li class="placeholder">Loading projects…</li>
+        </ul>
+      {:else if projects.length === 0}
         <ul class="home-project-list">
           <li class="placeholder">No projects yet.</li>
         </ul>

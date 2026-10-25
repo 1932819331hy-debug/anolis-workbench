@@ -115,6 +115,9 @@
   // Whether a status poll has settled yet: until it has, the stop card says it is
   // loading rather than that the runtime has not reported its safe state.
   let statusSettled = $state<boolean>(false);
+  // Whether /v0/devices has answered once: until then the list is loading,
+  // not empty (#568).
+  let devicesSettled = $state<boolean>(false);
   let startupSafeState = $state<StartupSafeStateStatus | null>(null);
   let estopRunning = $state<boolean>(false);
   let clearRunning = $state<boolean>(false);
@@ -238,6 +241,7 @@
 
   function clearOperateData(): void {
     statusSettled = false;
+    devicesSettled = false;
     devices = [];
     selectedKey = "";
     deviceStates = {};
@@ -331,6 +335,7 @@
 
     providerHealth = phRes.status === "fulfilled" ? extractProvidersHealth(phRes.value) : [];
 
+    devicesSettled = true;
     if (devRes.status === "fulfilled") {
       devices = extractDevices(devRes.value);
       if (devices.length && !selectedKey) {
@@ -1146,7 +1151,9 @@
       <div class="operate-device-list-col">
         <h3>Devices</h3>
         <ul class="operate-list">
-          {#if devices.length === 0}
+          {#if !devicesSettled}
+            <li class="placeholder">Loading devices…</li>
+          {:else if devices.length === 0}
             <li class="placeholder">No devices found.</li>
           {:else}
             {#each devices as device (`${device.provider_id}/${device.device_id}`)}
@@ -1178,6 +1185,7 @@
           <p class="placeholder">Select a device to inspect signals and execute functions.</p>
         {:else}
           {@const signals = deviceStates[selectedKey] ?? []}
+          {@const capsLoaded = capabilities[selectedKey] !== undefined}
           {@const caps = capabilities[selectedKey] ?? { functions: [] }}
 
           {#if signals.length === 0}
@@ -1203,7 +1211,9 @@
             </table>
           {/if}
 
-          {#if caps.functions?.length === 0}
+          {#if !capsLoaded}
+            <p class="placeholder">Loading functions…</p>
+          {:else if caps.functions?.length === 0}
             <p class="placeholder">No callable functions declared.</p>
           {:else}
             {#each caps.functions as func (func.function_id)}
