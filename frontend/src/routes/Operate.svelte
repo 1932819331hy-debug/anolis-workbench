@@ -258,6 +258,9 @@
       modeBadgeClass = "unknown";
       return;
     }
+    // Operate stopped (or unmounted) while this poll was in flight: opening the
+    // event stream now would leave one that nothing closes (wb#551).
+    if (pollTimer === null) return;
     const avail = deriveOperateAvailability(status, projectName);
     if (!avail.available) {
       mode = "--";
