@@ -519,3 +519,38 @@ describe('Operate.svelte — the /v0/events stream across mounts (#551)', () => 
     expect(open()).toBe(1);
   });
 });
+
+describe('Operate.svelte — no runtime running for this project (#510)', () => {
+  it('names the two ways to reach a runtime deployed to another machine', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, {})),
+    );
+    render(Operate, {
+      props: {
+        projectName: 'demo',
+        system: createProjectDocument('demo'),
+        runtimeStatus: { running: false, active_project: null },
+      },
+    });
+
+    expect(screen.getByText(/Runtime is not running for this project/)).toBeInTheDocument();
+    const routes = screen.getByTestId('operate-remote-routes');
+    expect(routes).toHaveTextContent('ssh -L 3010:127.0.0.1:3010');
+    expect(routes).toHaveTextContent('ANOLIS_WORKBENCH_RUNTIME_URL=http://127.0.0.1:8080');
+    expect(routes).toHaveTextContent('ANOLIS_WORKBENCH_RUNTIME_TOKEN');
+    expect(routes).toHaveTextContent('/etc/anolis/runtime.env');
+  });
+
+  it("does not show them when another project's runtime is running", () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, {})),
+    );
+    render(Operate, {
+      props: { projectName: 'other', system: createProjectDocument('other'), runtimeStatus: RUNNING },
+    });
+
+    expect(screen.queryByTestId('operate-remote-routes')).not.toBeInTheDocument();
+  });
+});

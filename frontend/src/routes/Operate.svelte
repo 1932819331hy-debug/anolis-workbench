@@ -823,6 +823,26 @@
         {/if}
       {:else}
         Runtime is not running for this project.
+        <!-- Until Operate can pick a deployed runtime itself (#510), name the
+             two ways to reach one on another machine. -->
+        <div class="field-note" data-testid="operate-remote-routes">
+          To operate a runtime deployed to another machine, either:
+          <ul>
+            <li>
+              run the workbench on that machine and reach it over an ssh tunnel:
+              <code>ssh -L 3010:127.0.0.1:3010 &lt;user&gt;@&lt;device&gt;</code>; or
+            </li>
+            <li>
+              tunnel the runtime's port (<code
+                >ssh -L 8080:127.0.0.1:8080 &lt;user&gt;@&lt;device&gt;</code
+              >) and start this workbench with
+              <code>ANOLIS_WORKBENCH_RUNTIME_URL=http://127.0.0.1:8080</code>. A runtime with
+              <code>auth_enabled: true</code> also needs
+              <code>ANOLIS_WORKBENCH_RUNTIME_TOKEN</code>, the <code>ANOLIS_API_TOKEN</code> in
+              <code>/etc/anolis/runtime.env</code> on an installed device.
+            </li>
+          </ul>
+        </div>
       {/if}
     </div>
   {:else}
