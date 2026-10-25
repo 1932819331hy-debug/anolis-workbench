@@ -189,6 +189,35 @@
     grafanaAccess: string[];
     installShWarning: string;
   };
+  // The project's pins beside what the target has installed (#567). The
+  // verdicts are the server's, the same ones a deploy acts on.
+  type ComponentCheck = {
+    name: string;
+    pinned: string | null;
+    installed: string | null;
+    verdict: string;
+    message: string;
+  };
+  type TargetCheck = { runtime: ComponentCheck; providers: ComponentCheck[]; manifest: string };
+  const VERDICT_TEXT: Record<string, string> = {
+    fresh: "not installed",
+    ok: "",
+    refuse: "older than installed: deploy refuses it",
+    downgrade: "older than installed: install.sh refuses it",
+    older: "older than installed",
+    unknown: "not recorded on the target",
+  };
+  const MANIFEST_NOTE: Record<string, string> = {
+    missing: "The target has no manifest.json, so its provider versions are unknown.",
+    unreadable:
+      "The target's manifest.json could not be read, so its provider versions are unknown.",
+    stale:
+      "The target's manifest.json was written for another runtime version than the one installed, so its provider versions may be out of date.",
+  };
+  let targetChecking = $state<boolean>(false);
+  let targetCheck = $state<{ target: string; result: TargetCheck } | null>(null);
+  let targetCheckError = $state<string>("");
+
   let deployTarget = $state<"local" | "remote">("remote");
   let deployHost = $state<string>("");
   // Sent once in the local job's request body, then cleared; never stored.
@@ -542,6 +571,32 @@
       };
     }
     return null;
+  }
+
+  async function doCheckTarget() {
+    if (!projectName) return;
+    const host = deployHost.trim();
+    if (deployTarget === "remote" && !host.includes("@")) {
+      targetCheckError = "Enter the target as user@host";
+      return;
+    }
+    targetChecking = true;
+    targetCheckError = "";
+    targetCheck = null;
+    const body: Record<string, unknown> = { project: projectName };
+    if (deployTarget === "remote") body.target = host;
+    try {
+      const result = await fetchJson<TargetCheck>("/api/provision/check-target", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      targetCheck = { target: deployTarget === "remote" ? host : "this machine", result };
+    } catch (err) {
+      targetCheckError = `Could not check the target: ${err instanceof Error ? err.message : String(err)}`;
+    } finally {
+      targetChecking = false;
+    }
   }
 
   async function doDeploy() {
@@ -1057,6 +1112,52 @@
       127.0.0.1 only with a current runtime, on its network address with an older one. The deploy
       result shows install.sh's observability report, and how to reach Grafana.
     </p>
+    <button
+      type="button"
+      class="btn-secondary"
+      id="btn-check-target"
+      disabled={deployRunning ||
+        targetChecking ||
+        (deployTarget === "remote" && !deployHost.trim())}
+      onclick={doCheckTarget}
+    >
+      {targetChecking ? "Checking…" : "Check target"}
+    </button>
+    {#if targetCheckError}
+      <p class="field-error">{targetCheckError}</p>
+    {/if}
+    {#if targetCheck}
+      {@const check = targetCheck.result}
+      <table class="target-versions" id="target-versions">
+        <caption>Pinned by this project, and installed on {targetCheck.target}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Component</th>
+            <th scope="col">Pinned</th>
+            <th scope="col">Installed</th>
+            <th scope="col">Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each [check.runtime, ...check.providers] as row, i (i)}
+            <tr class:target-version-warning={row.verdict !== "ok" && row.verdict !== "fresh"}>
+              <td>{row.name}</td>
+              <td>{row.pinned ?? "—"}</td>
+              <td>{row.installed ?? "—"}</td>
+              <td>{VERDICT_TEXT[row.verdict] ?? row.verdict}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      {#if check.runtime.message}
+        <p class={check.runtime.verdict === "refuse" ? "field-error" : "deploy-warning"}>
+          {check.runtime.message}
+        </p>
+      {/if}
+      {#if check.runtime.installed && MANIFEST_NOTE[check.manifest]}
+        <p class="field-note">{MANIFEST_NOTE[check.manifest]}</p>
+      {/if}
+    {/if}
     <button
       type="button"
       class="btn-primary"

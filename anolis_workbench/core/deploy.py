@@ -13,6 +13,7 @@ Authoring / dev-launch (~/.anolis/systems, launcher.py) is unaffected.
 
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
 import re
@@ -587,6 +588,30 @@ def _installed_runtime_version(executor: Executor, prefix: pathlib.Path) -> tupl
     return version
 
 
+def _runtime_verdict(installed: tuple[int, int, int], runtime_version: str) -> tuple[str, str]:
+    """What deploy does with this pin over this installed runtime: "ok",
+    "downgrade" (a warning; install.sh refuses it) or "refuse", and why.
+    Deploy and the target check both decide here (#567)."""
+    pinned = _xyz(runtime_version)
+    if pinned is None:
+        return "refuse", f"The project's runtime pin '{runtime_version}' is not X.Y.Z."
+    if pinned >= installed:
+        return "ok", ""
+    have = ".".join(map(str, installed))
+    want = ".".join(map(str, pinned))
+    guard = ".".join(map(str, DOWNGRADE_GUARD_VERSION))
+    if pinned < DOWNGRADE_GUARD_VERSION:
+        return "refuse", (
+            f"The target runs runtime {have}, newer than this project's pin {want}. install.sh {want} "
+            f"predates the downgrade guard (runtime {guard}), so it would install the older runtime "
+            f"without asking. Pin runtime {have} or newer to deploy."
+        )
+    return "downgrade", (
+        f"The target runs runtime {have}, newer than this project's pin {want}; "
+        f"install.sh {want} refuses to downgrade it. Pin runtime {have} or newer to deploy."
+    )
+
+
 def _check_downgrade(
     executor: Executor, prefix: pathlib.Path, runtime_version: str, progress: ProgressCallback
 ) -> None:
@@ -595,25 +620,102 @@ def _check_downgrade(
     installed = _installed_runtime_version(executor, prefix)
     if installed is None:
         return
-    pinned = _xyz(runtime_version)
-    if pinned is None:
-        raise DeployError(f"the project's runtime pin '{runtime_version}' is not X.Y.Z; nothing was deployed.")
-    if pinned >= installed:
-        return
-    have = ".".join(map(str, installed))
-    want = ".".join(map(str, pinned))
-    guard = ".".join(map(str, DOWNGRADE_GUARD_VERSION))
-    if pinned < DOWNGRADE_GUARD_VERSION:
-        raise DeployError(
-            f"The target runs runtime {have}, newer than this project's pin {want}. install.sh {want} "
-            f"predates the downgrade guard (runtime {guard}), so it would install the older runtime "
-            f"without asking. Nothing was deployed. Pin runtime {have} or newer to deploy."
-        )
-    progress(
-        "downgrade",
-        f"The target runs runtime {have}, newer than this project's pin {want}; "
-        f"install.sh {want} refuses to downgrade it. Pin runtime {have} or newer to deploy.",
-    )
+    verdict, message = _runtime_verdict(installed, runtime_version)
+    if verdict == "refuse":
+        raise DeployError(f"{message} Nothing was deployed.")
+    if verdict == "downgrade":
+        progress("downgrade", message)
+
+
+@dataclass
+class ComponentCheck:
+    """One pinned component beside what the target has installed."""
+
+    name: str  # "runtime", or a provider kind
+    pinned: str | None
+    installed: str | None
+    # runtime: "fresh" | "ok" | "downgrade" | "refuse"; provider: "fresh" | "ok" | "older" | "unknown"
+    verdict: str
+    message: str = ""
+
+
+@dataclass
+class TargetCheck:
+    runtime: ComponentCheck
+    providers: list[ComponentCheck]
+    # Where the providers' installed versions come from: install.sh's
+    # <prefix>/manifest.json, which records the last install. "ok", "missing",
+    # "unreadable", or "stale" when it lists another runtime than the one
+    # measured, so its provider versions may be out of date too.
+    manifest: str
+
+
+def _installed_manifest(executor: Executor, prefix: pathlib.Path) -> tuple[str, dict]:
+    path = (pathlib.PurePosixPath(prefix) / "manifest.json").as_posix()
+    try:
+        if not executor.file_exists(path):
+            return "missing", {}
+        result = executor.run(["cat", path], timeout=30)
+        doc = json.loads(result.stdout) if result.returncode == 0 else None
+    except Exception:  # noqa: BLE001 — informational: provider versions are then unknown
+        logger.warning("could not read %s on the target", path, exc_info=True)
+        return "unreadable", {}
+    if not isinstance(doc, dict):
+        return "unreadable", {}
+    return "ok", doc
+
+
+def check_target(
+    executor: Executor, *, project_dir: pathlib.Path, prefix: pathlib.Path = DEFAULT_INSTALL_PREFIX
+) -> TargetCheck:
+    """The project's pins beside the target's installed versions, and what a
+    deploy would do about the runtime (#567). Read-only: it runs the
+    installed runtime's --version, as deploy does, and reads manifest.json.
+
+    A runtime that cannot be read is a DeployError, the same refusal deploy
+    gives."""
+    try:
+        profile = machine_profile.load_profile(project_dir.resolve())
+    except machine_profile.ProfileError as exc:
+        raise DeployError(str(exc)) from exc
+    components = profile.get("components")
+    if not isinstance(components, dict):
+        components = {}
+    runtime_entry = components.get("runtime")
+    runtime_pin = runtime_entry.get("version") if isinstance(runtime_entry, dict) else None
+    provider_entries = components.get("providers")
+    provider_pins = {
+        name: entry.get("version")
+        for name, entry in (provider_entries.items() if isinstance(provider_entries, dict) else [])
+        if isinstance(entry, dict)
+    }
+
+    installed = _installed_runtime_version(executor, prefix)
+    if installed is None:
+        runtime = ComponentCheck("runtime", runtime_pin, None, "fresh")
+    else:
+        verdict, message = _runtime_verdict(installed, str(runtime_pin or ""))
+        runtime = ComponentCheck("runtime", runtime_pin, ".".join(map(str, installed)), verdict, message)
+
+    manifest, doc = _installed_manifest(executor, prefix)
+    if manifest == "ok" and installed is not None and _xyz(str(doc.get("version", ""))) != installed:
+        manifest = "stale"
+    listed = doc.get("components")
+    recorded = listed.get("providers") if isinstance(listed, dict) else None
+    if not isinstance(recorded, dict):
+        recorded = {}
+    providers = []
+    for name, pin in sorted(provider_pins.items()):
+        entry = recorded.get(name)
+        have = entry.get("version") if isinstance(entry, dict) else None
+        if installed is None:
+            providers.append(ComponentCheck(name, pin, None, "fresh"))
+        elif not isinstance(have, str) or _xyz(have) is None or _xyz(str(pin or "")) is None:
+            providers.append(ComponentCheck(name, pin, have if isinstance(have, str) else None, "unknown"))
+        else:
+            older = _xyz(str(pin)) < _xyz(have)  # type: ignore[operator]
+            providers.append(ComponentCheck(name, pin, have, "older" if older else "ok"))
+    return TargetCheck(runtime=runtime, providers=providers, manifest=manifest)
 
 
 def _preflight_needs_attention(block: list[str]) -> bool:

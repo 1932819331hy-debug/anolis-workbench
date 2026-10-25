@@ -732,3 +732,130 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('Commission.svelte — the target check (#567)', () => {
+  type Reply = { status: number; body: unknown };
+
+  function setup(reply: Reply) {
+    const posts: { path: string; body: Record<string, unknown> }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = pathFromInput(input);
+        if (path === '/api/provision/check-target') {
+          posts.push({ path, body: JSON.parse(String(init?.body ?? '{}')) });
+          return jsonResponse(reply.status, reply.body);
+        }
+        return jsonResponse(200, {});
+      }),
+    );
+    render(Commission, {
+      props: {
+        projectName: 'demo',
+        system: createProjectDocument('demo'),
+        runtimeStatus: createRuntimeStatus(),
+        commissionRunningForCurrent: false,
+      },
+    });
+    return { posts };
+  }
+
+  const refused = {
+    runtime: {
+      name: 'runtime',
+      pinned: '0.1.43',
+      installed: '0.1.51',
+      verdict: 'refuse',
+      message:
+        'The target runs runtime 0.1.51, newer than this project\'s pin 0.1.43. install.sh 0.1.43 predates the downgrade guard (runtime 0.1.45), so it would install the older runtime without asking. Pin runtime 0.1.51 or newer to deploy.',
+    },
+    providers: [
+      { name: 'bread', pinned: '0.5.0', installed: '0.8.1', verdict: 'older', message: '' },
+      { name: 'ezo', pinned: '0.4.0', installed: '0.4.0', verdict: 'ok', message: '' },
+    ],
+    manifest: 'ok',
+  };
+
+  async function check(target = 'pi@rig') {
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), { target: { value: target } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Check target' }));
+  }
+
+  it('shows the pins against the target and the refusal deploy would give', async () => {
+    const { posts } = setup({ status: 200, body: refused });
+    expect(screen.getByRole('button', { name: 'Check target' })).toBeDisabled();
+
+    await check();
+
+    const table = await screen.findByRole('table', { name: 'Pinned by this project, and installed on pi@rig' });
+    const rows = within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent));
+    expect(rows).toEqual([
+      ['runtime', '0.1.43', '0.1.51', 'older than installed: deploy refuses it'],
+      ['bread', '0.5.0', '0.8.1', 'older than installed'],
+      ['ezo', '0.4.0', '0.4.0', ''],
+    ]);
+    expect(within(table).getAllByRole('row')[1]).toHaveClass('target-version-warning');
+    expect(within(table).getAllByRole('row')[3]).not.toHaveClass('target-version-warning');
+    expect(screen.getByText(/predates the downgrade guard/)).toHaveClass('field-error');
+    expect(posts).toEqual([{ path: '/api/provision/check-target', body: { project: 'demo', target: 'pi@rig' } }]);
+  });
+
+  it('shows a guarded downgrade as a warning', async () => {
+    setup({
+      status: 200,
+      body: {
+        ...refused,
+        runtime: {
+          ...refused.runtime,
+          pinned: '0.1.46',
+          verdict: 'downgrade',
+          message: 'The target runs runtime 0.1.51, newer than this project\'s pin 0.1.46; install.sh 0.1.46 refuses to downgrade it.',
+        },
+      },
+    });
+    await check();
+    expect(await screen.findByText('older than installed: install.sh refuses it')).toBeInTheDocument();
+    expect(screen.getByText(/install\.sh 0\.1\.46 refuses to downgrade it/)).toHaveClass('deploy-warning');
+  });
+
+  it('says when the provider versions come from a stale manifest', async () => {
+    setup({ status: 200, body: { ...refused, manifest: 'stale' } });
+    await check();
+    expect(await screen.findByText(/manifest\.json was written for another runtime version/)).toBeInTheDocument();
+  });
+
+  it('shows a fresh target without a manifest note', async () => {
+    setup({
+      status: 200,
+      body: {
+        runtime: { name: 'runtime', pinned: '0.1.51', installed: null, verdict: 'fresh', message: '' },
+        providers: [{ name: 'bread', pinned: '0.8.1', installed: null, verdict: 'fresh', message: '' }],
+        manifest: 'missing',
+      },
+    });
+    await check();
+    const table = await screen.findByRole('table');
+    expect(within(table).getAllByText('not installed')).toHaveLength(2);
+    expect(screen.queryByText(/manifest\.json/)).toBeNull();
+  });
+
+  it('reports a target it could not read', async () => {
+    setup({ status: 422, body: { error: '/opt/anolis/bin/anolis-runtime on the target reports no version' } });
+    await check();
+    expect(
+      await screen.findByText('Could not check the target: /opt/anolis/bin/anolis-runtime on the target reports no version'),
+    ).toHaveClass('field-error');
+    expect(screen.queryByRole('table')).toBeNull();
+  });
+
+  it('checks this machine without a target', async () => {
+    const { posts } = setup({ status: 200, body: refused });
+    await fireEvent.click(screen.getByLabelText('This machine'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Check target' }));
+    expect(await screen.findByRole('table', { name: 'Pinned by this project, and installed on this machine' })).toBeInTheDocument();
+    expect(posts[0].body).toEqual({ project: 'demo' });
+  });
+});

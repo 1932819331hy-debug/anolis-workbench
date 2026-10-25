@@ -10,7 +10,7 @@ import ipaddress
 import json
 import threading
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -293,6 +293,57 @@ def start_remote(handler: Any) -> None:
     thread.start()
 
     handler._json(202, {"job_id": job.job_id})
+
+
+def check_target(handler: Any) -> None:
+    """POST /api/provision/check-target — the project's pins beside what the
+    target has installed, and what a deploy would do about the runtime (#567).
+
+    Read-only: it runs the target's installed runtime with --version and reads
+    its manifest.json, here (no `target`) or over SSH. It creates nothing,
+    and needs no sudo.
+    """
+    content_length = int(handler.headers.get("Content-Length", 0))
+    body = handler.rfile.read(content_length) if content_length else b"{}"
+    params = json.loads(body)
+    if not params.get("project"):
+        handler._json(400, {"error": "Missing 'project' field"})
+        return
+    if _reject_invalid_names(handler, params):
+        return
+    project_dir = paths_module.SYSTEMS_ROOT / params["project"]
+    if not project_dir.is_dir():
+        handler._json(404, {"error": f"Project '{params['project']}' not found"})
+        return
+    target = params.get("target")
+    if target is not None and (not isinstance(target, str) or "@" not in target):
+        handler._json(400, {"error": "'target' must be user@host"})
+        return
+
+    ssh = None
+    try:
+        if target is None:
+            executor: Any = LocalExecutor()
+        else:
+            user, host = target.split("@", 1)
+            executor = ssh = ParamikoSSHExecutor(
+                host=host, user=user, key_file=params.get("key_file"), port=params.get("port", 22)
+            )
+        result = deploy.check_target(
+            executor,
+            project_dir=project_dir,
+            prefix=Path(params.get("install_prefix", str(DEFAULT_INSTALL_PREFIX))),
+        )
+    except deploy.DeployError as exc:
+        handler._json(422, {"error": str(exc)})
+        return
+    except Exception as exc:  # noqa: BLE001 — the SSH connection, reported to the card
+        handler._json(502, {"error": f"Could not reach {target}: {exc}"})
+        return
+    finally:
+        if ssh is not None:
+            ssh.close()
+    handler._json(200, asdict(result))
 
 
 def get_status(handler: Any, job_id: str) -> None:

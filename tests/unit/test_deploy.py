@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import pathlib
-from typing import Callable
+from typing import Any, Callable
 
 import pytest
 import requests
@@ -369,7 +370,7 @@ def test_deploy_refuses_a_pin_that_is_not_xyz_over_an_installed_runtime(
     _pin_runtime(project_dir, "latest")
     _refuse_fetch(monkeypatch)
     executor = InstalledRuntimeExecutor("anolis-runtime 0.1.50\n")
-    with pytest.raises(deploy.DeployError, match="pin 'latest' is not X.Y.Z; nothing was deployed"):
+    with pytest.raises(deploy.DeployError, match=r"pin 'latest' is not X\.Y\.Z\. Nothing was deployed\."):
         _deploy(False, project_dir, executor, [])
     assert executor.files == {}
 
@@ -409,6 +410,138 @@ def test_deploy_refuses_a_runtime_whose_version_cannot_be_read(
         _deploy(remote, project_dir, executor, [])
     assert not [c for c in executor.commands if c["cmd"][0] == "bash"]
     assert executor.files == {}
+
+
+# ---------------------------------------------------------------------------
+# check_target: the pins beside the target's installed versions (#567)
+# ---------------------------------------------------------------------------
+
+_MANIFEST = "/opt/anolis/manifest.json"
+
+
+def _manifest(runtime: str, providers: dict[str, str]) -> str:
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "version": runtime,
+            "components": {
+                "runtime": {"version": runtime},
+                "providers": {n: {"version": v} for n, v in providers.items()},
+            },
+        },
+        indent=2,
+    )
+
+
+class TargetExecutor(InstalledRuntimeExecutor):
+    """InstalledRuntimeExecutor whose prefix also holds manifest_text, if given."""
+
+    def __init__(self, stdout: str | None, manifest_text: str | None = None, **kwargs: Any) -> None:
+        super().__init__(stdout, **kwargs)
+        self.manifest_text = manifest_text
+
+    def file_exists(self, path):
+        if path == _MANIFEST:
+            return self.manifest_text is not None
+        return super().file_exists(path)
+
+    def run(self, cmd, *, input=None, sudo=False, timeout=None):
+        if list(cmd) == ["cat", _MANIFEST]:
+            self.commands.append({"cmd": list(cmd), "sudo": sudo, "timeout": timeout})
+            return RunResult(returncode=0, stdout=self.manifest_text or "", stderr="")
+        return super().run(cmd, input=input, sudo=sudo, timeout=timeout)
+
+
+def _read_only(executor: RecordingExecutor) -> None:
+    # Only the version probe and the manifest read: nothing written, no sudo.
+    assert {tuple(c["cmd"]) for c in executor.commands} <= {(_RUNTIME_BIN, "--version"), ("cat", _MANIFEST)}
+    assert not [c for c in executor.commands if c["sudo"]]
+    assert executor.files == {} and executor.mkdirs == []
+
+
+@pytest.mark.parametrize(
+    ("pin", "verdict", "says"),
+    [
+        ("0.1.27", "refuse", "predates the downgrade guard"),
+        ("0.1.46", "downgrade", "refuses to downgrade it"),
+        ("0.1.50", "ok", ""),
+        ("0.1.52", "ok", ""),
+    ],
+)
+def test_check_target_gives_the_runtime_verdict_deploy_would(
+    pin: str, verdict: str, says: str, project_dir: pathlib.Path
+) -> None:
+    _pin_runtime(project_dir, pin)
+    executor = TargetExecutor("anolis-runtime 0.1.50\n", _manifest("0.1.50", {"sim": "0.2.5"}))
+    check = deploy.check_target(executor, project_dir=project_dir)
+    assert (check.runtime.name, check.runtime.pinned, check.runtime.installed) == ("runtime", pin, "0.1.50")
+    assert check.runtime.verdict == verdict
+    assert says in check.runtime.message
+    _read_only(executor)
+
+
+def test_check_target_and_deploy_refuse_with_the_same_words(
+    project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _refuse_fetch(monkeypatch)
+    check = deploy.check_target(TargetExecutor("anolis-runtime 0.1.50\n"), project_dir=project_dir)
+    with pytest.raises(deploy.DeployError) as info:
+        deploy.deploy_local(project_dir=project_dir, project_name="deploy-fixture", executor=TargetExecutor("0.1.50"))
+    assert str(info.value) == f"{check.runtime.message} Nothing was deployed."
+
+
+@pytest.mark.parametrize(
+    ("installed", "verdict"),
+    [("0.2.5", "ok"), ("0.2.10", "older"), ("0.2.1", "ok")],
+    ids=["same", "newer-installed", "older-installed"],
+)
+def test_check_target_compares_provider_pins_with_the_manifest(
+    installed: str, verdict: str, project_dir: pathlib.Path
+) -> None:
+    # The fixture pins sim 0.2.5; 0.2.10 is newer numerically.
+    executor = TargetExecutor("anolis-runtime 0.1.27\n", _manifest("0.1.27", {"sim": installed}))
+    check = deploy.check_target(executor, project_dir=project_dir)
+    assert check.manifest == "ok"
+    assert [(p.name, p.pinned, p.installed, p.verdict) for p in check.providers] == [
+        ("sim", "0.2.5", installed, verdict)
+    ]
+
+
+def test_check_target_flags_a_manifest_from_another_runtime(project_dir: pathlib.Path) -> None:
+    executor = TargetExecutor("anolis-runtime 0.1.50\n", _manifest("0.1.43", {"sim": "0.2.5"}))
+    check = deploy.check_target(executor, project_dir=project_dir)
+    assert check.manifest == "stale"
+    assert check.providers[0].installed == "0.2.5"
+
+
+@pytest.mark.parametrize(
+    ("manifest_text", "state"),
+    [(None, "missing"), ("not json", "unreadable"), ("[]", "unreadable")],
+    ids=["missing", "not-json", "not-an-object"],
+)
+def test_check_target_without_a_manifest_leaves_providers_unknown(
+    manifest_text: str | None, state: str, project_dir: pathlib.Path
+) -> None:
+    executor = TargetExecutor("anolis-runtime 0.1.27\n", manifest_text)
+    check = deploy.check_target(executor, project_dir=project_dir)
+    assert check.manifest == state
+    assert [(p.name, p.installed, p.verdict) for p in check.providers] == [("sim", None, "unknown")]
+    assert check.runtime.verdict == "ok"
+
+
+def test_check_target_on_a_fresh_target(project_dir: pathlib.Path) -> None:
+    executor = TargetExecutor(None)
+    check = deploy.check_target(executor, project_dir=project_dir)
+    assert (check.runtime.installed, check.runtime.verdict) == (None, "fresh")
+    assert [(p.name, p.verdict) for p in check.providers] == [("sim", "fresh")]
+    assert check.manifest == "missing"
+    assert executor.commands == []
+
+
+def test_check_target_refuses_a_runtime_whose_version_cannot_be_read(project_dir: pathlib.Path) -> None:
+    executor = TargetExecutor("", returncode=126)
+    with pytest.raises(deploy.DeployError, match="reports no version"):
+        deploy.check_target(executor, project_dir=project_dir)
 
 
 def test_deploy_local_runs_install_sh_project(project_dir: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -254,3 +254,93 @@ class TestJobManagement:
         job = provision._create_job()
         assert provision._get_job(job.job_id) is job
         assert provision._get_job("missing") is None
+
+
+class TestCheckTarget:
+    """POST /api/provision/check-target answers synchronously and creates nothing (#567)."""
+
+    @pytest.fixture()
+    def systems(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+        (tmp_path / "rig").mkdir()
+        monkeypatch.setattr(provision.paths_module, "SYSTEMS_ROOT", tmp_path)
+        return tmp_path
+
+    @staticmethod
+    def _result() -> Any:
+        from anolis_workbench.core.deploy import ComponentCheck, TargetCheck
+
+        return TargetCheck(
+            runtime=ComponentCheck("runtime", "0.1.43", "0.1.51", "refuse", "predates the downgrade guard"),
+            providers=[ComponentCheck("bread", "0.5.0", "0.8.1", "older")],
+            manifest="ok",
+        )
+
+    def test_local_check_returns_the_comparison(self, systems: Any) -> None:
+        handler = FakeHandler({"project": "rig"})
+        jobs_before = len(provision._jobs)
+        with patch.object(provision.deploy, "check_target", return_value=self._result()) as check:
+            provision.check_target(handler)
+        assert len(provision._jobs) == jobs_before  # answered inline, no job
+        status, data = handler._responses[0]
+        assert status == 200
+        assert data["runtime"] == {
+            "name": "runtime",
+            "pinned": "0.1.43",
+            "installed": "0.1.51",
+            "verdict": "refuse",
+            "message": "predates the downgrade guard",
+        }
+        assert data["providers"][0]["verdict"] == "older"
+        assert data["manifest"] == "ok"
+        executor = check.call_args.args[0]
+        assert isinstance(executor, provision.LocalExecutor)
+        assert check.call_args.kwargs["project_dir"] == systems / "rig"
+
+    def test_remote_check_connects_over_ssh_and_closes(self, systems: Any) -> None:
+        handler = FakeHandler({"project": "rig", "target": "pi@10.0.0.5"})
+        with (
+            patch.object(provision, "ParamikoSSHExecutor") as ssh,
+            patch.object(provision.deploy, "check_target", return_value=self._result()),
+        ):
+            provision.check_target(handler)
+        assert handler._responses[0][0] == 200
+        assert ssh.call_args.kwargs["host"] == "10.0.0.5"
+        assert ssh.call_args.kwargs["user"] == "pi"
+        ssh.return_value.close.assert_called_once()
+
+    def test_an_unreadable_runtime_is_422(self, systems: Any) -> None:
+        from anolis_workbench.core.deploy import DeployError
+
+        handler = FakeHandler({"project": "rig"})
+        with patch.object(provision.deploy, "check_target", side_effect=DeployError("reports no version")):
+            provision.check_target(handler)
+        assert handler._responses == [(422, {"error": "reports no version"})]
+
+    def test_an_unreachable_target_is_502(self, systems: Any) -> None:
+        handler = FakeHandler({"project": "rig", "target": "pi@10.0.0.5"})
+        with patch.object(provision, "ParamikoSSHExecutor", side_effect=OSError("no route to host")):
+            provision.check_target(handler)
+        status, data = handler._responses[0]
+        assert status == 502
+        assert "pi@10.0.0.5" in data["error"] and "no route to host" in data["error"]
+
+    @pytest.mark.parametrize(
+        ("body", "status"),
+        [
+            ({}, 400),
+            ({"project": "../etc"}, 400),
+            ({"project": "missing"}, 404),
+            ({"project": "rig", "target": "10.0.0.5"}, 400),
+        ],
+        ids=["no-project", "bad-name", "unknown-project", "target-without-user"],
+    )
+    def test_bad_requests_never_reach_the_target(self, body: dict[str, Any], status: int, systems: Any) -> None:
+        handler = FakeHandler(body)
+        with (
+            patch.object(provision, "ParamikoSSHExecutor") as ssh,
+            patch.object(provision.deploy, "check_target") as check,
+        ):
+            provision.check_target(handler)
+        assert handler._responses[0][0] == status
+        ssh.assert_not_called()
+        check.assert_not_called()

@@ -1364,6 +1364,28 @@ body {
   font-weight: 500;
 }
 
+.target-versions {
+  margin: 8px 0;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.target-versions caption {
+  text-align: left;
+  padding-bottom: 4px;
+  color: var(--text-muted);
+}
+
+.target-versions th,
+.target-versions td {
+  padding: 2px 12px 2px 0;
+  text-align: left;
+}
+
+.target-version-warning td {
+  color: var(--state-warning);
+}
+
 /* ─── Preflight check details ───────────────────────────────────────────── */
 
 .check-name {

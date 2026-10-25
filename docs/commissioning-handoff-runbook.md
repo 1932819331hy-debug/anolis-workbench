@@ -73,6 +73,15 @@ runtime, the deploy:
 A runtime that is installed but reports no version is refused as well. A
 target with no runtime installed is a fresh install.
 
+To see this before deploying, use Commission's **Check target**. It
+installs nothing and needs no sudo. It lists each of the project's pins
+beside the version installed on the target, and gives the runtime verdict
+the deploy would act on. The runtime's installed version is measured from
+its binary. The providers' versions come from the target's
+`<prefix>/manifest.json`, which records the last install, and the card says
+when that file is missing, unreadable or was written for another runtime
+version.
+
 ## 4) Export Package (Provenance Record)
 
 Workbench path:
