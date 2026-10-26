@@ -15,6 +15,7 @@
     RuntimeApiStatus,
     RuntimeStatus,
     StartupSafeStateStatus,
+    StopChainStatus,
     TypedValue,
     UnknownRecord,
     WorkbenchConfig,
@@ -42,6 +43,7 @@
     extractProvidersHealth,
     extractRuntimeStatus,
     extractStartupSafeState,
+    extractStopChain,
     normalizeParameterType,
     normalizeProviderHealthQuality,
     renderBtOutline,
@@ -131,6 +133,8 @@
   // not empty (#568).
   let devicesSettled = $state<boolean>(false);
   let startupSafeState = $state<StartupSafeStateStatus | null>(null);
+  // The observed emergency stop; null when the project configures none (wb#631).
+  let stopChain = $state<StopChainStatus | null>(null);
   let estopRunning = $state<boolean>(false);
   let clearRunning = $state<boolean>(false);
   let clearArmed = $state<boolean>(false);
@@ -275,6 +279,7 @@
     modeBadgeClass = "unknown";
     estop = null;
     startupSafeState = null;
+    stopChain = null;
     estopFeedback = "";
     estopFeedbackClass = "field-note";
     clearArmed = false;
@@ -371,6 +376,7 @@
     statusSettled = true;
     startupSafeState =
       rtRes.status === "fulfilled" ? extractStartupSafeState(rtRes.value) : startupSafeState;
+    stopChain = rtRes.status === "fulfilled" ? extractStopChain(rtRes.value) : stopChain;
     parameters = parRes.status === "fulfilled" ? extractParameters(parRes.value) : [];
     automationStatus = asRes.status === "fulfilled" ? extractAutomationStatus(asRes.value) : null;
     behaviorTree = atRes.status === "fulfilled" ? extractAutomationTree(atRes.value) : "";
@@ -493,6 +499,8 @@
     try {
       const p = await fetchJson<UnknownRecord>("/v0/runtime/status");
       if (epoch === estopEpoch) estop = extractEstopStatus(p);
+      // No stop or clear reply reports the stop chain, so no epoch applies.
+      stopChain = extractStopChain(p);
     } catch {
       // Best-effort; the 5s status poll corrects the display shortly.
     }
@@ -748,6 +756,7 @@
     else if (eventType === "parameter_change") void refreshParametersOnly();
     else if (eventType === "automation_fault") consumeAutomationFaultEvent(payload);
     else if (eventType === "device_removed") consumeDeviceRemovedEvent(payload);
+    else if (eventType === "stop_chain_change") void refreshEstopOnly();
     addTraceEvent(eventType, payload);
   }
 
@@ -1099,6 +1108,44 @@
             </InfoToggle>
           {/if}
         {/if}
+        {#if stopChain}
+          <!-- The observed emergency stop (wb#631): the runtime reads it from a
+               signal and never commands it. Absent without safety.stop_chain.
+               The reset is the clear above, which the runtime refuses, with its
+               reason, until it reads the stop released. -->
+          {#if stopChain.state === "in_force"}
+            <span class="estop-chip field-error" data-testid="stop-chain-state">
+              Emergency stop in force
+            </span>
+          {:else if stopChain.state === "unknown"}
+            <span class="estop-chip field-error" data-testid="stop-chain-state">
+              ⚠ Emergency stop status unknown
+            </span>
+          {:else if estop?.latched}
+            <span class="estop-chip" data-testid="stop-chain-state">
+              Emergency stop released: clear the latch to reset
+            </span>
+          {:else}
+            <span class="estop-chip" data-testid="stop-chain-state">Emergency stop clear</span>
+          {/if}
+          <InfoToggle label="About the emergency stop">
+            The runtime observes the emergency stop through <code>{stopChain.signal}</code> and
+            never commands it.
+            {#if stopChain.reason}Reading: {stopChain.reason}.{/if}
+            {#if stopChain.since_epoch_ms !== null}Since {formatEpochMs(
+                stopChain.since_epoch_ms,
+              )}.{/if}
+            {#if stopChain.state === "in_force"}
+              Release it at the machine, then clear the latch here. The clear is refused until the
+              runtime reads the stop released.
+            {:else if stopChain.state === "unknown"}
+              An unreadable status may be an emergency stop or a power fault, so the latch is held
+              and the clear is refused until the status reads released.
+            {:else if estop?.latched}
+              Releasing the stop never clears the latch: clearing it re-enables actuation.
+            {/if}
+          </InfoToggle>
+        {/if}
         {#if startupSafeState}
           <!-- What safety.on_startup did when this runtime started (#483). The
                verdict is the runtime's; Runtime Status always carries it, and
@@ -1167,7 +1214,12 @@
     <div class="operate-section">
       <h3>Runtime Status</h3>
       {#if runtimeStatusData}
-        {@const health = summarizeRuntimeHealth(runtimeStatusData, estop, startupSafeState)}
+        {@const health = summarizeRuntimeHealth(
+          runtimeStatusData,
+          estop,
+          startupSafeState,
+          stopChain,
+        )}
         <span class="badge {health.cls}" data-testid="runtime-health">{health.label}</span>
         {#if health.reasons.length > 0}
           <span class="operate-meta">{health.reasons.join("; ")}.</span>
@@ -1265,6 +1317,10 @@
                 >
                   {device.display_name || device.device_id || key} ({key})
                 </button>
+                {#if stopChain?.state === "in_force" && stopChain.devices.includes(key)}
+                  <!-- Powered off by the emergency stop: stopped, not faulted (wb#631). -->
+                  <span class="badge unavailable" data-testid="device-stopped">STOPPED</span>
+                {/if}
               </li>
             {/each}
           {/if}

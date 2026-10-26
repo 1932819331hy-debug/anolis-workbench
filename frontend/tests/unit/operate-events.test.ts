@@ -72,6 +72,7 @@ describe("operate-events helpers", () => {
       "parameter_change",
       "automation_fault",
       "device_removed",
+      "stop_chain_change",
     ]);
   });
 
@@ -99,6 +100,13 @@ describe("operate-events helpers", () => {
     expect(describeEvent("device_removed", { provider_id: "sim0", device_id: "dev0" })).toBe(
       "sim0/dev0 removed",
     );
+    expect(
+      describeEvent("stop_chain_change", {
+        previous_state: "clear",
+        new_state: "in_force",
+        reason: "gpio0/estop/chain_open reads true",
+      }),
+    ).toBe("emergency stop clear -> in_force: gpio0/estop/chain_open reads true");
     expect(
       describeEvent("quality_change", {
         provider_id: "sim0",

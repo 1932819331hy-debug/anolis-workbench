@@ -19,6 +19,7 @@ import {
   extractProvidersHealth,
   extractRuntimeStatus,
   extractStartupSafeState,
+  extractStopChain,
   normalizeArgSpec,
   normalizeFunctionArgs,
   normalizeFunctionSpecs,
@@ -651,6 +652,32 @@ describe("versionAtLeast", () => {
   });
 });
 
+describe("extractStopChain (wb#631)", () => {
+  const chain = {
+    state: "in_force",
+    reason: "gpio0/estop/chain_open reads true",
+    signal: "gpio0/estop/chain_open",
+    devices: ["bread0/dcmt0"],
+    expected_losses: ["bread0/dcmt0"],
+    since_epoch_ms: 1761400000000,
+  };
+
+  it("is null without a stop chain, so Operate shows nothing new", () => {
+    expect(extractStopChain({ estop: { latched: false } })).toBeNull();
+    expect(extractStopChain({ stop_chain: null })).toBeNull();
+    expect(extractStopChain({ stop_chain: [] })).toBeNull();
+  });
+
+  it("reads the runtime's block", () => {
+    expect(extractStopChain({ stop_chain: chain })).toEqual(chain);
+  });
+
+  it("reads a state it does not know as unknown, never as clear", () => {
+    expect(extractStopChain({ stop_chain: { ...chain, state: "tripped" } })?.state).toBe("unknown");
+    expect(extractStopChain({ stop_chain: { ...chain, state: undefined } })?.state).toBe("unknown");
+  });
+});
+
 describe("summarizeRuntimeHealth (wb#557)", () => {
   const loaded = (providers: { provider_id: string; state: string }[] = []) =>
     extractRuntimeStatus({ status: { code: "OK" }, providers });
@@ -687,6 +714,42 @@ describe("summarizeRuntimeHealth (wb#557)", () => {
     const h = summarizeRuntimeHealth(loaded(), estop(false), startup(false));
     expect(h.label).toBe("ATTENTION");
     expect(h.reasons).toEqual(["startup safe state not achieved"]);
+  });
+
+  it("names the emergency stop, and a device it removed as stopped, not lost (wb#631)", () => {
+    const status = extractRuntimeStatus({
+      status: { code: "OK" },
+      providers: [],
+      device_loss_latched: ["bread0/dcmt0", "bread0/rlht0"],
+    });
+    const chain = (state: string) =>
+      extractStopChain({
+        stop_chain: {
+          state,
+          reason: "",
+          signal: "gpio0/estop/chain_open",
+          devices: ["bread0/dcmt0"],
+          expected_losses: state === "in_force" ? ["bread0/dcmt0"] : [],
+          since_epoch_ms: null,
+        },
+      });
+    expect(summarizeRuntimeHealth(status, estop(true), null, chain("in_force")).reasons).toEqual([
+      "emergency stop in force",
+      "software stop latched",
+      "device bread0/dcmt0 stopped by the emergency stop",
+      "device bread0/rlht0 lost (latched)",
+    ]);
+    expect(summarizeRuntimeHealth(status, estop(true), null, chain("unknown")).reasons).toEqual([
+      "emergency stop status unknown",
+      "software stop latched",
+      "device bread0/dcmt0 lost (latched)",
+      "device bread0/rlht0 lost (latched)",
+    ]);
+    expect(summarizeRuntimeHealth(loaded(), estop(false), null, chain("clear"))).toEqual({
+      label: "OK",
+      cls: "ok",
+      reasons: [],
+    });
   });
 
   it("names each device latched after going unreachable", () => {

@@ -15,6 +15,8 @@ import type {
   RuntimeApiStatus,
   SoftwareSafeState,
   StartupSafeStateStatus,
+  StopChainState,
+  StopChainStatus,
   UnknownRecord,
 } from "./contracts";
 
@@ -322,6 +324,27 @@ export function extractEstopStatus(payload: unknown): EstopStatus | null {
 }
 
 /**
+ * Extract the `stop_chain` block from a `GET /v0/runtime/status` body (wb#631).
+ * Null when it is absent: the project configures no stop chain, or the runtime
+ * is older than anolis 0.1.53. A state this build does not know reads as
+ * unknown, which the runtime also holds the latch on.
+ */
+export function extractStopChain(payload: unknown): StopChainStatus | null {
+  const raw = asObject(payload).stop_chain;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = asObject(raw);
+  const state: StopChainState = r.state === "in_force" || r.state === "clear" ? r.state : "unknown";
+  return {
+    state,
+    reason: typeof r.reason === "string" ? r.reason : "",
+    signal: typeof r.signal === "string" ? r.signal : "",
+    devices: asArray(r.devices).map(String),
+    expected_losses: asArray(r.expected_losses).map(String),
+    since_epoch_ms: r.since_epoch_ms == null ? null : toFinite(r.since_epoch_ms),
+  };
+}
+
+/**
  * Extract the `startup_safe_state` block from a `GET /v0/runtime/status` body.
  * Returns null when it is absent (a runtime older than anolis 0.1.45) or not an
  * object, so the UI shows nothing rather than guess.
@@ -406,6 +429,7 @@ export function summarizeRuntimeHealth(
   status: RuntimeApiStatus | null,
   estop: EstopStatus | null,
   startup: StartupSafeStateStatus | null,
+  stopChain: StopChainStatus | null = null,
 ): {
   label: "OK" | "ATTENTION" | "UNAVAILABLE";
   cls: "ok" | "fault" | "unavailable";
@@ -415,6 +439,8 @@ export function summarizeRuntimeHealth(
     return { label: "UNAVAILABLE", cls: "unavailable", reasons: [] };
   }
   const reasons: string[] = [];
+  if (stopChain?.state === "in_force") reasons.push("emergency stop in force");
+  if (stopChain?.state === "unknown") reasons.push("emergency stop status unknown");
   if (estop?.latched) reasons.push("software stop latched");
   if (startup && !summarizeStartupSafeState(startup).ok) {
     reasons.push("startup safe state not achieved");
@@ -422,7 +448,15 @@ export function summarizeRuntimeHealth(
   for (const p of status.providers) {
     if (p.state !== "AVAILABLE") reasons.push(`provider ${p.provider_id} ${p.state}`);
   }
-  for (const handle of status.device_loss_latched) reasons.push(`device ${handle} lost (latched)`);
+  // A device the stop removed power from is the stop, not a device fault (wb#631).
+  const stopped = new Set(stopChain?.expected_losses ?? []);
+  for (const handle of status.device_loss_latched) {
+    reasons.push(
+      stopped.has(handle)
+        ? `device ${handle} stopped by the emergency stop`
+        : `device ${handle} lost (latched)`,
+    );
+  }
   return reasons.length > 0
     ? { label: "ATTENTION", cls: "fault", reasons }
     : { label: "OK", cls: "ok", reasons };

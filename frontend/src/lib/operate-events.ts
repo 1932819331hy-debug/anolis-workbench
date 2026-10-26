@@ -9,6 +9,7 @@ export const DEFAULT_SSE_EVENT_TYPES = [
   "parameter_change",
   "automation_fault",
   "device_removed",
+  "stop_chain_change",
 ] as const;
 
 export type OperateConnectionState = "connected" | "disconnected" | "reconnecting" | "stale";
@@ -63,6 +64,11 @@ export function describeEvent(eventType: string, payload: UnknownRecord | null):
     const locusRaw = payload.locus ?? payload.node;
     const locus = typeof locusRaw === "string" && locusRaw !== "" ? `${locusRaw}: ` : "";
     return `${locus}${payload.error ?? "Unknown automation fault"}`;
+  }
+  if (eventType === "stop_chain_change") {
+    const reason =
+      typeof payload.reason === "string" && payload.reason ? `: ${payload.reason}` : "";
+    return `emergency stop ${payload.previous_state ?? "?"} -> ${payload.new_state ?? "?"}${reason}`;
   }
   if (eventType === "device_removed") {
     return `${payload.provider_id ?? "provider"}/${payload.device_id ?? "device"} removed`;

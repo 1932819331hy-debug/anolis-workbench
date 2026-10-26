@@ -293,6 +293,25 @@ export interface EstopStatus extends UnknownRecord {
   uncovered_actuating_functions: number;
 }
 
+/** What the runtime reads the observed emergency stop as (anolis 0.1.53). */
+export type StopChainState = "in_force" | "clear" | "unknown";
+
+/**
+ * `stop_chain` from `GET /v0/runtime/status` (runtime-http `StopChainStatus`),
+ * present only when the project configures `safety.stop_chain`. The runtime
+ * observes the emergency stop; it never commands it.
+ */
+export interface StopChainStatus extends UnknownRecord {
+  state: StopChainState;
+  reason: string;
+  signal: string;
+  /** The provider/device handles the stop removes power from. */
+  devices: string[];
+  /** In-scope devices lost while the stop is in force: the stop, not a fault. */
+  expected_losses: string[];
+  since_epoch_ms: number | null;
+}
+
 /** One safe-state call, as in `EstopResponse.actions` (runtime-http `EstopAction`). */
 export interface EstopAction extends UnknownRecord {
   device_handle: string;
