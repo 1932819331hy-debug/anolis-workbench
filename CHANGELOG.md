@@ -13,6 +13,46 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-26
+
+### Added
+
+- Operate offers a string argument's `allowed_values` as a select (#576,
+  #625). anolis 0.1.53 publishes them, and anolis-provider-bread 0.9.1
+  declares `set_mode`'s modes. A required argument left on "Choose…"
+  sends nothing, and a value outside the set is refused before the call
+  is sent, so a form value the restarted runtime no longer offers isn't
+  sent.
+- Check target lists a project's optional components, such as
+  `telemetry_export` (#620, #630), each beside the version the target's
+  `manifest.json` records.
+
+### Changed
+
+- The software stop card is one row at button height (#613, #627). The
+  readiness, coverage and startup safe state notes moved behind ⓘ
+  toggles, and the "Not an emergency stop" disclaimer is a panel
+  anchored to the right.
+- Contracts synced to anolis 0.1.53 and anolis-provider-bread 0.9.1
+  (#634). The sim quickstart template pins runtime 0.1.53. When a stop
+  chain refuses a clear, Operate shows the runtime's reason: "Failed to
+  clear latch: the emergency stop is in force (…); release it first".
+
+### Fixed
+
+- The Mode card shows the mode when the runtime has no automation layer
+  (#582, #624). It said UNKNOWN beside a Runtime Status of MANUAL, and
+  offered four modes that each failed with 503. It now shows the status's
+  mode, and says "Mode can't be set: Automation layer not enabled".
+- Operate handles `device_removed` and no longer subscribes to
+  `provider_health_change`, which the runtime never sent (#516, #628,
+  #632). A removed device leaves the device list at once, and when it
+  returns it fetches its own capabilities again; a reply already in
+  flight when it left is dropped.
+- Runtime Status and a selected device's signals show "Loading…" until
+  their first reply (#623, #629). Before, they showed UNAVAILABLE and
+  "No signals available." as fact.
+
 ## [0.20.1] - 2026-10-25
 
 ### Fixed
