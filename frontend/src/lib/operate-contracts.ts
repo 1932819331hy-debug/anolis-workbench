@@ -15,6 +15,7 @@ import type {
   RuntimeApiStatus,
   SoftwareSafeState,
   StartupSafeStateStatus,
+  StopChainExpect,
   StopChainState,
   StopChainStatus,
   UnknownRecord,
@@ -339,9 +340,31 @@ export function extractStopChain(payload: unknown): StopChainStatus | null {
     reason: typeof r.reason === "string" ? r.reason : "",
     signal: typeof r.signal === "string" ? r.signal : "",
     devices: asArray(r.devices).map(String),
+    expectations: extractStopChainExpectations(r.expectations),
     expected_losses: asArray(r.expected_losses).map(String),
+    mismatches: asArray(r.mismatches).flatMap((entry) => {
+      const m = asObject(entry);
+      if (typeof m.device !== "string") return [];
+      return [
+        {
+          device: m.device,
+          expect: typeof m.expect === "string" ? m.expect : "",
+          reason: typeof m.reason === "string" ? m.reason : "",
+          since_epoch_ms: m.since_epoch_ms == null ? null : toFinite(m.since_epoch_ms),
+        },
+      ];
+    }),
     since_epoch_ms: r.since_epoch_ms == null ? null : toFinite(r.since_epoch_ms),
   };
+}
+
+/** The declared expectations by handle; absent before anolis 0.1.55. */
+function extractStopChainExpectations(raw: unknown): Record<string, StopChainExpect> {
+  const out: Record<string, StopChainExpect> = {};
+  for (const [handle, expect] of Object.entries(asObject(raw))) {
+    if (expect === "power_loss" || expect === "reports_estop") out[handle] = expect;
+  }
+  return out;
 }
 
 /**
@@ -441,6 +464,7 @@ export function summarizeRuntimeHealth(
   const reasons: string[] = [];
   if (stopChain?.state === "in_force") reasons.push("emergency stop in force");
   if (stopChain?.state === "unknown") reasons.push("emergency stop status unknown");
+  for (const m of stopChain?.mismatches ?? []) reasons.push(`stop not reaching ${m.device}`);
   if (estop?.latched) reasons.push("software stop latched");
   if (startup && !summarizeStartupSafeState(startup).ok) {
     reasons.push("startup safe state not achieved");

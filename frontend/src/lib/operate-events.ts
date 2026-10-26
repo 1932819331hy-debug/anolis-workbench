@@ -10,6 +10,7 @@ export const DEFAULT_SSE_EVENT_TYPES = [
   "automation_fault",
   "device_removed",
   "stop_chain_change",
+  "stop_chain_mismatch",
 ] as const;
 
 export type OperateConnectionState = "connected" | "disconnected" | "reconnecting" | "stale";
@@ -69,6 +70,13 @@ export function describeEvent(eventType: string, payload: UnknownRecord | null):
     const reason =
       typeof payload.reason === "string" && payload.reason ? `: ${payload.reason}` : "";
     return `emergency stop ${payload.previous_state ?? "?"} -> ${payload.new_state ?? "?"}${reason}`;
+  }
+  if (eventType === "stop_chain_mismatch") {
+    const verb = payload.raised === true ? "stop not reaching" : "stop reaching";
+    const again = payload.raised === true ? "" : " again";
+    const reason =
+      typeof payload.reason === "string" && payload.reason ? `: ${payload.reason}` : "";
+    return `${verb} ${payload.device ?? "device"}${again} (expect ${payload.expect ?? "?"})${reason}`;
   }
   if (eventType === "device_removed") {
     return `${payload.provider_id ?? "provider"}/${payload.device_id ?? "device"} removed`;

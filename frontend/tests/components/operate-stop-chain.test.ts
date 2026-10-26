@@ -121,6 +121,53 @@ describe('Operate.svelte — the observed emergency stop (#631)', () => {
     expect(within(deviceItem('gpio0/estop')).queryByTestId('device-stopped')).not.toBeInTheDocument();
     expect(screen.getByText(/device bread0\/dcmt0 stopped by the emergency stop/)).toBeInTheDocument();
     expect(screen.queryByText(/device bread0\/dcmt0 lost \(latched\)/)).not.toBeInTheDocument();
+    // A runtime before 0.1.55 sends no expectations or mismatches: nothing for them.
+    expect(screen.queryByTestId('stop-chain-mismatch')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('device-stop-expect')).not.toBeInTheDocument();
+  });
+
+  it('in force, a device it is not reaching: the alarm, its reason, and the device marked', async () => {
+    const mismatch = {
+      device: 'bread0/dcmt0',
+      expect: 'reports_estop',
+      reason: 'bread0/dcmt0/estop reads false',
+      since_epoch_ms: 1_700_000_001_500,
+    };
+    renderOperate(() =>
+      status(
+        true,
+        stopChain('in_force', { expectations: { 'bread0/dcmt0': 'reports_estop' }, mismatches: [mismatch] }),
+      ),
+    );
+
+    const alarm = await within(row()).findByTestId('stop-chain-mismatch');
+    expect(alarm).toHaveTextContent('⚠ Stop not reaching bread0/dcmt0');
+    expect(alarm).toHaveClass('field-error');
+    await fireEvent.click(within(row()).getByRole('button', { name: 'About stop not reaching bread0/dcmt0' }));
+    expect(row()).toHaveTextContent(
+      'bread0/dcmt0 should report its estop signal true while the stop is in force, but bread0/dcmt0/estop reads false.',
+    );
+    expect(row()).toHaveTextContent('check its power and stop wiring before releasing the stop');
+
+    await waitFor(() =>
+      expect(within(deviceItem('bread0/dcmt0')).getByTestId('device-stop-mismatch')).toHaveTextContent(
+        'STOP NOT REACHING',
+      ),
+    );
+    expect(within(deviceItem('bread0/dcmt0')).queryByTestId('device-stopped')).not.toBeInTheDocument();
+    expect(screen.getByText(/stop not reaching bread0\/dcmt0/)).toBeInTheDocument();
+  });
+
+  it("shows each device's declared expectation, and none on a device without one", async () => {
+    renderOperate(() => status(false, stopChain('clear', { expectations: { 'bread0/dcmt0': 'power_loss' } })));
+
+    await waitFor(() =>
+      expect(within(deviceItem('bread0/dcmt0')).getByTestId('device-stop-expect')).toHaveTextContent(
+        'expects power loss',
+      ),
+    );
+    expect(within(deviceItem('gpio0/estop')).queryByTestId('device-stop-expect')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('stop-chain-mismatch')).not.toBeInTheDocument();
   });
 
   it("in force: the reset is the clear, and the runtime's refusal reason is shown", async () => {
@@ -194,6 +241,27 @@ describe('Operate.svelte — the observed emergency stop (#631)', () => {
     });
 
     await waitFor(() => expect(within(row()).getByTestId('stop-chain-state')).toHaveTextContent('Emergency stop in force'));
+    expect(fetchMock.mock.calls.filter(([input]) => pathFromInput(input) === '/v0/runtime/status').length).toBe(2);
+  });
+
+  it('re-reads the status on a stop_chain_mismatch event', async () => {
+    let chain = stopChain('in_force', { expectations: { 'bread0/dcmt0': 'power_loss' }, mismatches: [] });
+    const fetchMock = renderOperate(() => status(true, chain));
+    await within(row()).findByTestId('stop-chain-state');
+    expect(within(row()).queryByTestId('stop-chain-mismatch')).not.toBeInTheDocument();
+
+    const mismatch = {
+      device: 'bread0/dcmt0',
+      expect: 'power_loss',
+      reason: 'bread0/dcmt0 still answers: speed read 40 ms ago, after the stop',
+      since_epoch_ms: 1_700_000_001_500,
+    };
+    chain = stopChain('in_force', { expectations: { 'bread0/dcmt0': 'power_loss' }, mismatches: [mismatch] });
+    ListeningEventSource.last?.emit('stop_chain_mismatch', { ...mismatch, raised: true, timestamp_ms: 1_700_000_001_500 });
+
+    await waitFor(() =>
+      expect(within(row()).getByTestId('stop-chain-mismatch')).toHaveTextContent('Stop not reaching bread0/dcmt0'),
+    );
     expect(fetchMock.mock.calls.filter(([input]) => pathFromInput(input) === '/v0/runtime/status').length).toBe(2);
   });
 });

@@ -657,8 +657,17 @@ describe("extractStopChain (wb#631)", () => {
     state: "in_force",
     reason: "gpio0/estop/chain_open reads true",
     signal: "gpio0/estop/chain_open",
-    devices: ["bread0/dcmt0"],
+    devices: ["bread0/dcmt0", "bread0/dcmt1"],
+    expectations: { "bread0/dcmt1": "reports_estop" },
     expected_losses: ["bread0/dcmt0"],
+    mismatches: [
+      {
+        device: "bread0/dcmt1",
+        expect: "reports_estop",
+        reason: "bread0/dcmt1/estop reads false",
+        since_epoch_ms: 1761400001500,
+      },
+    ],
     since_epoch_ms: 1761400000000,
   };
 
@@ -675,6 +684,27 @@ describe("extractStopChain (wb#631)", () => {
   it("reads a state it does not know as unknown, never as clear", () => {
     expect(extractStopChain({ stop_chain: { ...chain, state: "tripped" } })?.state).toBe("unknown");
     expect(extractStopChain({ stop_chain: { ...chain, state: undefined } })?.state).toBe("unknown");
+  });
+
+  it("reads a runtime before 0.1.55, which sends neither, as no expectations and no mismatches", () => {
+    const { expectations: _e, mismatches: _m, ...older } = chain;
+    const read = extractStopChain({ stop_chain: older });
+    expect(read?.expectations).toEqual({});
+    expect(read?.mismatches).toEqual([]);
+  });
+
+  it("keeps only expectations it knows, and mismatches that name a device", () => {
+    const read = extractStopChain({
+      stop_chain: {
+        ...chain,
+        expectations: { "bread0/dcmt0": "power_loss", "bread0/dcmt1": "sometimes", "bread0/rlht0": 3 },
+        mismatches: [{ reason: "no device" }, { device: "bread0/dcmt0", expect: "power_loss" }],
+      },
+    });
+    expect(read?.expectations).toEqual({ "bread0/dcmt0": "power_loss" });
+    expect(read?.mismatches).toEqual([
+      { device: "bread0/dcmt0", expect: "power_loss", reason: "", since_epoch_ms: null },
+    ]);
   });
 });
 
@@ -750,6 +780,28 @@ describe("summarizeRuntimeHealth (wb#557)", () => {
       cls: "ok",
       reasons: [],
     });
+  });
+
+  it("names each device the stop is not reaching (wb#631)", () => {
+    const chain = extractStopChain({
+      stop_chain: {
+        state: "in_force",
+        reason: "",
+        signal: "gpio0/estop/chain_open",
+        devices: ["bread0/dcmt0", "bread0/dcmt1"],
+        expectations: { "bread0/dcmt1": "reports_estop" },
+        expected_losses: [],
+        mismatches: [
+          { device: "bread0/dcmt1", expect: "reports_estop", reason: "estop reads false", since_epoch_ms: 1 },
+        ],
+        since_epoch_ms: null,
+      },
+    });
+    expect(summarizeRuntimeHealth(loaded(), estop(true), null, chain).reasons).toEqual([
+      "emergency stop in force",
+      "stop not reaching bread0/dcmt1",
+      "software stop latched",
+    ]);
   });
 
   it("names each device latched after going unreachable", () => {

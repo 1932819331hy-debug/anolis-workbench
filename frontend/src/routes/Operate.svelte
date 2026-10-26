@@ -756,7 +756,8 @@
     else if (eventType === "parameter_change") void refreshParametersOnly();
     else if (eventType === "automation_fault") consumeAutomationFaultEvent(payload);
     else if (eventType === "device_removed") consumeDeviceRemovedEvent(payload);
-    else if (eventType === "stop_chain_change") void refreshEstopOnly();
+    else if (eventType === "stop_chain_change" || eventType === "stop_chain_mismatch")
+      void refreshEstopOnly();
     addTraceEvent(eventType, payload);
   }
 
@@ -840,6 +841,13 @@
     if (!version || !version.engine_kind) return "none loaded";
     const digest = version.digest ? ` ${version.digest.slice(0, 12)}` : "";
     return `${version.engine_kind}${digest}`;
+  }
+
+  /** What a stop-chain `expect` says the device does while the stop is in force. */
+  function stopExpectText(expect: string): string {
+    if (expect === "power_loss") return "lose power";
+    if (expect === "reports_estop") return "report its estop signal true";
+    return `behave as declared (${expect || "no expectation sent"})`;
   }
 
   function formatEpochMs(ms: number | null): string {
@@ -1145,6 +1153,18 @@
               Releasing the stop never clears the latch: clearing it re-enables actuation.
             {/if}
           </InfoToggle>
+          {#each stopChain.mismatches as mismatch (mismatch.device)}
+            <!-- A declared expect contradicted while in force (anolis 0.1.55). The
+                 hold is the same either way; this is the alarm. -->
+            <span class="estop-chip field-error" data-testid="stop-chain-mismatch">
+              ⚠ Stop not reaching {mismatch.device}
+            </span>
+            <InfoToggle label={`About stop not reaching ${mismatch.device}`}>
+              {mismatch.device} should {stopExpectText(mismatch.expect)} while the stop is in force{#if mismatch.reason},
+                but {mismatch.reason}{/if}. The stop may not be reaching it: check its power and
+              stop wiring before releasing the stop. The latch is held either way.
+            </InfoToggle>
+          {/each}
         {/if}
         {#if startupSafeState}
           <!-- What safety.on_startup did when this runtime started (#483). The
@@ -1317,9 +1337,21 @@
                 >
                   {device.display_name || device.device_id || key} ({key})
                 </button>
-                {#if stopChain?.state === "in_force" && stopChain.devices.includes(key)}
+                {#if stopChain?.mismatches.some((m) => m.device === key)}
+                  <!-- In scope, but not behaving as the stop should make it (wb#631). -->
+                  <span class="badge fault" data-testid="device-stop-mismatch"
+                    >STOP NOT REACHING</span
+                  >
+                {:else if stopChain?.state === "in_force" && stopChain.devices.includes(key)}
                   <!-- Powered off by the emergency stop: stopped, not faulted (wb#631). -->
                   <span class="badge unavailable" data-testid="device-stopped">STOPPED</span>
+                {/if}
+                {#if stopChain?.expectations[key]}
+                  <span class="badge" data-testid="device-stop-expect">
+                    expects {stopChain.expectations[key] === "power_loss"
+                      ? "power loss"
+                      : "estop report"}
+                  </span>
                 {/if}
               </li>
             {/each}

@@ -307,8 +307,24 @@ export interface StopChainStatus extends UnknownRecord {
   signal: string;
   /** The provider/device handles the stop removes power from. */
   devices: string[];
+  /** Each in-scope device's declared `expect`, by handle (anolis 0.1.55). */
+  expectations: Record<string, StopChainExpect>;
   /** In-scope devices lost while the stop is in force: the stop, not a fault. */
   expected_losses: string[];
+  /** "Stop not reaching <device>": a declared expect contradicted while in force. */
+  mismatches: StopChainMismatch[];
+  since_epoch_ms: number | null;
+}
+
+/** What a device in the stop's scope does when the stop is in force. */
+export type StopChainExpect = "power_loss" | "reports_estop";
+
+/** One `stop_chain.mismatches` entry (runtime-http `StopChainMismatch`). */
+export interface StopChainMismatch extends UnknownRecord {
+  device: string;
+  /** power_loss or reports_estop; kept as sent, so a newer value still shows. */
+  expect: string;
+  reason: string;
   since_epoch_ms: number | null;
 }
 

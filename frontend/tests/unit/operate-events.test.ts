@@ -73,6 +73,7 @@ describe("operate-events helpers", () => {
       "automation_fault",
       "device_removed",
       "stop_chain_change",
+      "stop_chain_mismatch",
     ]);
   });
 
@@ -107,6 +108,22 @@ describe("operate-events helpers", () => {
         reason: "gpio0/estop/chain_open reads true",
       }),
     ).toBe("emergency stop clear -> in_force: gpio0/estop/chain_open reads true");
+    expect(
+      describeEvent("stop_chain_mismatch", {
+        device: "bread0/dcmt1",
+        expect: "reports_estop",
+        raised: true,
+        reason: "bread0/dcmt1/estop reads false",
+      }),
+    ).toBe("stop not reaching bread0/dcmt1 (expect reports_estop): bread0/dcmt1/estop reads false");
+    expect(
+      describeEvent("stop_chain_mismatch", {
+        device: "bread0/dcmt1",
+        expect: "reports_estop",
+        raised: false,
+        reason: "the stop is no longer in force",
+      }),
+    ).toBe("stop reaching bread0/dcmt1 again (expect reports_estop): the stop is no longer in force");
     expect(
       describeEvent("quality_change", {
         provider_id: "sim0",
