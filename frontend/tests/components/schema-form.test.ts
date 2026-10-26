@@ -321,6 +321,20 @@ describe("SchemaForm — form details (#578)", () => {
     expect(devices[devices.length - 1].id).toBe("heater-a");
   });
 
+  it("gives a new RLHT row no encoders, as bread 0.9.2's schema forbids it there (#640)", async () => {
+    const config = breadConfig();
+    render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged: vi.fn() } });
+
+    const added = await addDevice(config);
+    expect(added.type).toBe("rlht");
+    expect("encoders" in added).toBe(false);
+    expect(screen.queryByRole("checkbox", { name: /Encoders fitted/ })).not.toBeInTheDocument();
+
+    // As a DCMT it offers the flag, absent reading as bread's default.
+    await fireEvent.change(lastTypeSelect(), { target: { value: "dcmt" } });
+    expect(screen.getByRole("checkbox", { name: /Encoders fitted/ })).toBeChecked();
+  });
+
   it("gives the address box a placeholder that does not read as a value", async () => {
     const config = breadConfig();
     render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged: vi.fn() } });

@@ -1,5 +1,6 @@
 """Project CRUD and filesystem helpers for Anolis Workbench."""
 
+import copy
 import functools
 import json
 import os
@@ -452,6 +453,31 @@ def _strip_influx_tokens(document: dict) -> list[str]:
     return notes
 
 
+def _drop_rlht_encoders(document: dict) -> list[str]:
+    """bread 0.9.2's schema forbids `encoders` on an RLHT device (#640), and
+    0.20.x wrote it on every new bread row. bread's loader drops it from an RLHT
+    with a warning (anolishq/anolis-provider-bread#188); do the same before
+    validating, so an existing project still saves. A DCMT's value is kept."""
+    notes = []
+    providers = document.get("providers")
+    for pid, entry in sorted(providers.items() if isinstance(providers, dict) else []):
+        if not isinstance(entry, dict) or entry.get("kind") != "bread":
+            continue
+        config = entry.get("config")
+        devices = config.get("devices") if isinstance(config, dict) else None
+        dropped = []
+        for device in devices if isinstance(devices, list) else []:
+            if isinstance(device, dict) and device.get("type") == "rlht" and "encoders" in device:
+                del device["encoders"]
+                dropped.append(str(device.get("id")))
+        if dropped:
+            notes.append(
+                f"Removed encoders from RLHT device(s) {', '.join(dropped)} of provider '{pid}'; "
+                "it applies to DCMT only, and bread ignores it on an RLHT. Save to apply."
+            )
+    return notes
+
+
 def get_project(name: str) -> dict:
     """The whole canonical project as one document.
 
@@ -466,7 +492,9 @@ def get_project(name: str) -> dict:
         except (machine_profile.ProfileError, canonical.CanonicalError) as exc:
             return {**_degraded_project(name), "warnings": [str(exc)]}
         document["meta"] = document.get("meta") or {"name": name}
-        document["warnings"] = _with_derived_warnings(document) + _strip_influx_tokens(document)
+        document["warnings"] = (
+            _with_derived_warnings(document) + _strip_influx_tokens(document) + _drop_rlht_encoders(document)
+        )
         return document
     if fmt == FORMAT_SYSTEM:
         # Listed (hiding it would look like deletion) but not migratable, so
@@ -554,6 +582,8 @@ def save_project(name: str, document: dict) -> None:
             "verbatim — edit it in its source repository and re-import."
         )
 
+    document = copy.deepcopy(document)
+    _drop_rlht_encoders(document)
     errors = validate_project_payload(document, project_dir=pdir)
     if errors:
         raise ProjectValidationError(errors)
