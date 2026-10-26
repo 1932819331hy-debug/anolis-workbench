@@ -3,19 +3,19 @@
   "source": {
     "repo": "anolishq/anolis",
     "path": "schemas/machine/machine-profile.schema.json",
-    "tag": "v0.1.53"
+    "tag": "v0.1.55"
   },
   "distribution": {
     "mode": "release-artifact",
     "asset_format": "tar-member",
     "release": {
       "repo": "anolishq/anolis",
-      "tag": "v0.1.53",
-      "asset": "anolis-0.1.53-machine-profile-schema.tar.gz",
+      "tag": "v0.1.55",
+      "asset": "anolis-0.1.55-machine-profile-schema.tar.gz",
       "manifest_asset": "machine-profile-schema-manifest.json"
     },
     "schema_sha256": "e12ca74bf9fd4fcb001ea073de91f458a4dab88894d774dd4e26bdaca41f5c96",
-    "asset_sha256": "1e7c37f48a9c21bc82467824f06ec63254461d8671e10b4b15de37a1e103a406"
+    "asset_sha256": "16be60a32d1fb0669ef9ba66c0e5b7cfe6326fa89dd61f700b6dff2d1a4fbe8b"
   },
-  "synced_at_utc": "2026-10-26T05:14:29Z"
+  "synced_at_utc": "2026-10-26T22:34:17Z"
 }
