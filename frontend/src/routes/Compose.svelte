@@ -38,7 +38,8 @@
     /** The variant being edited. Choosing it never touches launch.variant (#339). */
     editingVariant?: string;
     onDirty: () => void;
-    onSaved: () => void;
+    /** Called with the body the save sent, so an edit made meanwhile stays unsaved. */
+    onSaved: (body: string) => void;
   } = $props();
 
   const imported = $derived(isImportedDoc(system));
@@ -161,13 +162,14 @@
     saveError = "";
     saveErrors = [];
     try {
+      const body = JSON.stringify(system);
       await fetchJson(`/api/projects/${encodeURIComponent(projectName)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(system),
+        body,
       });
       saveAttempt.failed = false;
-      onSaved();
+      onSaved(body);
     } catch (err) {
       saveAttempt.failed = true;
       if (err instanceof ApiResponseError && err.payload && typeof err.payload === "object") {

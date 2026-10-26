@@ -47,6 +47,9 @@
   let saved = $state<SavedLaunch | null>(null);
   let workspace = $state<WorkspaceName | null>(null);
   let dirty = $state<boolean>(false);
+  // The project as last read from or written to disk, serialized. `dirty` is
+  // whether the draft differs from it, not whether an edit happened (#622).
+  let savedDoc: string | null = null;
   let currentPath = $state<string>("/");
   let commissionRunningForCurrent = $state<boolean>(false);
   let confirmModalOpen = $state<boolean>(false);
@@ -185,6 +188,7 @@
     try {
       const doc = await fetchJson<ProjectDoc>(`/api/projects/${encodeURIComponent(name)}`);
       saved = savedLaunch(doc);
+      savedDoc = JSON.stringify(doc);
       system = doc;
       projectName = name;
       return true;
@@ -404,10 +408,11 @@
         {runtimeStatus}
         bind:editingVariant
         onDirty={() => {
-          dirty = true;
+          dirty = JSON.stringify(system) !== savedDoc;
         }}
-        onSaved={() => {
-          dirty = false;
+        onSaved={(body) => {
+          savedDoc = body;
+          dirty = JSON.stringify(system) !== savedDoc;
           saved = savedLaunch(system);
         }}
       />
