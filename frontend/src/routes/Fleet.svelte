@@ -7,7 +7,8 @@
     name: string;
     host: string;
     project: string;
-    template: string;
+    // Absent for a project not made from a template (#621).
+    template?: string;
   }
 
   let targets = $state<FleetTarget[]>([]);
@@ -69,7 +70,7 @@
             <td>{target.name}</td>
             <td>{target.host}</td>
             <td>{target.project}</td>
-            <td>{target.template}</td>
+            <td>{target.template ?? "—"}</td>
           </tr>
         {/each}
       </tbody>

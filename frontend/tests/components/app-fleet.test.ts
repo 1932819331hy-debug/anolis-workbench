@@ -4,8 +4,10 @@ import { describe, expect, it, vi } from 'vitest';
 import App from '../../src/App.svelte';
 import { jsonResponse, pathFromInput } from './helpers';
 
-/** No projects; /api/fleet answers with one target. */
-function stubApi() {
+/** No projects; /api/fleet answers with `targets`, one target by default. */
+function stubApi(
+  targets: unknown[] = [{ name: 'rig-a', host: 'pi@rig-a', project: 'demo', template: 'sim-quickstart' }],
+) {
   const fetchMock = vi.fn((input: RequestInfo | URL) => {
     const path = pathFromInput(input);
     if (path === '/api/projects') return Promise.resolve(jsonResponse(200, []));
@@ -13,11 +15,7 @@ function stubApi() {
       return Promise.resolve(jsonResponse(200, { running: false, active_project: null }));
     if (path === '/api/templates') return Promise.resolve(jsonResponse(200, []));
     if (path === '/api/fleet')
-      return Promise.resolve(
-        jsonResponse(200, {
-          targets: [{ name: 'rig-a', host: 'pi@rig-a', project: 'demo', template: 'sim-quickstart' }],
-        }),
-      );
+      return Promise.resolve(jsonResponse(200, { targets }));
     return Promise.resolve(jsonResponse(200, {}));
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -48,5 +46,19 @@ describe('App: the Fleet Dashboard route (#555)', () => {
     expect(await screen.findByRole('heading', { name: 'Fleet Dashboard' })).toBeInTheDocument();
     expect(window.location.pathname).toBe('/fleet');
     await waitFor(() => expect(fleetRequests(fetchMock)).toBe(1));
+  });
+
+  it('shows a dash for a target whose project was not made from a template (#621)', async () => {
+    stubApi([
+      { name: 'rig-a', host: 'pi@rig-a', project: 'demo', template: 'sim-quickstart' },
+      { name: 'rig-b', host: 'pi@rig-b', project: 'bioreactor-v1-b3' },
+    ]);
+    history.replaceState({}, '', '/fleet');
+    render(App);
+
+    const imported = (await screen.findByRole('cell', { name: 'bioreactor-v1-b3' })).closest('tr');
+    expect(imported?.lastElementChild).toHaveTextContent('—');
+    const seeded = screen.getByRole('cell', { name: 'demo' }).closest('tr');
+    expect(seeded?.lastElementChild).toHaveTextContent('sim-quickstart');
   });
 });

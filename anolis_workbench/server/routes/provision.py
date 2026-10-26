@@ -90,6 +90,14 @@ def _prepare_workspace(params: dict[str, Any], progress: Any, *, allow_replace: 
     return project_dir
 
 
+def _project_template(project_dir: Path) -> str | None:
+    """The template a workspace project was made from, or None for one that
+    was not, such as an imported machine (#621)."""
+    meta = (machine_profile.read_sidecar(project_dir) or {}).get("meta")
+    template = meta.get("template") if isinstance(meta, dict) else None
+    return template if isinstance(template, str) and template else None
+
+
 def _deploy_error_fields(exc: Exception) -> dict[str, Any]:
     """The host-preflight block and reboot flag a failed deploy carries."""
     if not isinstance(exc, deploy.DeployError):
@@ -184,11 +192,7 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
         # Auto-add host to fleet registry
         from anolis_workbench.core.fleet import auto_register_host
 
-        auto_register_host(
-            host=host,
-            project=params.get("project") or params.get("template") or DEFAULT_TEMPLATE,
-            template=params.get("template") or DEFAULT_TEMPLATE,
-        )
+        auto_register_host(host=host, project=project, template=_project_template(project_dir))
         job.events.append(
             {
                 "stage": "done",

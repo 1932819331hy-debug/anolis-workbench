@@ -251,11 +251,13 @@ _FLEET_REGISTRY_PATH = Path.home() / ".anolis" / "fleet.yaml"
 def auto_register_host(
     host: str,
     project: str,
-    template: str = DEFAULT_TEMPLATE,
+    template: str | None = None,
 ) -> None:
-    """Add a host to the fleet registry if not already present.
+    """Record a successful remote deploy in the fleet registry.
 
-    Called automatically after a successful remote provision.
+    A host already listed has its row updated to the project just deployed
+    (#621); its other keys are kept. `template` is the project's own, and is
+    left out for a project not made from one, such as an imported machine.
     """
     _FLEET_REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -271,21 +273,16 @@ def auto_register_host(
     if not isinstance(targets, list):
         targets = []
 
-    # Check if host is already registered
-    existing_hosts = {t.get("host") for t in targets if isinstance(t, dict)}
-    if host in existing_hosts:
-        return
-
-    # Add new entry
-    name = host.replace(".", "-").split("@")[-1] if "@" not in host else host.split("@")[1].replace(".", "-")
-    targets.append(
-        {
-            "name": name,
-            "host": host,
-            "project": project,
-            "template": template,
-        }
-    )
+    entry = next((t for t in targets if isinstance(t, dict) and t.get("host") == host), None)
+    if entry is None:
+        name = host.replace(".", "-").split("@")[-1] if "@" not in host else host.split("@")[1].replace(".", "-")
+        entry = {"name": name, "host": host}
+        targets.append(entry)
+    entry["project"] = project
+    if template:
+        entry["template"] = template
+    else:
+        entry.pop("template", None)
     raw["targets"] = targets
     _FLEET_REGISTRY_PATH.write_text(
         yaml.dump(raw, default_flow_style=False, sort_keys=False),

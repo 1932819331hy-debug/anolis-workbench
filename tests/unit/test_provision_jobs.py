@@ -6,6 +6,7 @@ import pathlib
 from typing import Any
 
 import pytest
+import yaml
 
 from anolis_workbench.core import deploy
 from anolis_workbench.server.routes import provision
@@ -346,3 +347,53 @@ def test_bundle_done_event_repeats_an_unverified_install_sh(
     provision._run_bundle_job(job, {"project": "rig", "arch": "arm64"})
     assert job.status == "done"
     assert job.events[-1]["detail"] == detail
+
+
+def test_a_second_deploy_to_a_host_updates_its_fleet_row(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Fleet showed the first project ever deployed to a host, and a template
+    for an imported one (#621)."""
+    from anolis_workbench.core import canonical, fleet
+
+    registry = tmp_path / "fleet.yaml"
+    monkeypatch.setattr(fleet, "_FLEET_REGISTRY_PATH", registry)
+    seeded = tmp_path / "bioreactor-pi"
+    imported = tmp_path / "bioreactor-v1-b3"
+    for project_dir, meta in (
+        (seeded, {"name": "bioreactor-pi", "template": "sim-quickstart"}),
+        (imported, {"name": "bioreactor-v1-b3"}),
+    ):
+        project_dir.mkdir()
+        canonical.write_sidecar(project_dir, {"meta": meta})
+    monkeypatch.setattr(provision, "_prepare_workspace", lambda params, progress: tmp_path / params["project"])
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        return deploy.DeployResult(
+            project_name=kwargs["project_name"], runtime_version="0.1.52", prefix="/opt/anolis", output=""
+        )
+
+    class _Executor:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(deploy, "deploy_remote", _deploy)
+    monkeypatch.setattr(provision, "ParamikoSSHExecutor", _Executor)
+
+    provision._run_remote_job(
+        provision.ProvisionJob(job_id="j7"), {"project": "bioreactor-pi", "target": "pi@10.0.0.5"}
+    )
+    first = yaml.safe_load(registry.read_text(encoding="utf-8"))["targets"]
+    assert first == [{"name": "10-0-0-5", "host": "10.0.0.5", "project": "bioreactor-pi", "template": "sim-quickstart"}]
+
+    # The deploy request's own template default is not the project's.
+    provision._run_remote_job(
+        provision.ProvisionJob(job_id="j8"),
+        {"project": "bioreactor-v1-b3", "target": "pi@10.0.0.5", "template": "sim-quickstart"},
+    )
+    assert yaml.safe_load(registry.read_text(encoding="utf-8"))["targets"] == [
+        {"name": "10-0-0-5", "host": "10.0.0.5", "project": "bioreactor-v1-b3"}
+    ]

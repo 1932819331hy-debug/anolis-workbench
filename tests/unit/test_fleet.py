@@ -193,3 +193,41 @@ def test_target_without_a_template_defaults_to_the_shipped_one() -> None:
     )
     config = fleet_module.load_fleet_file(path)
     assert config.targets[0].template == fleet_module.DEFAULT_TEMPLATE == "sim-quickstart"
+
+
+def test_auto_register_keeps_the_rest_of_an_existing_row(monkeypatch, tmp_path) -> None:
+    """A row an operator edited keeps its keys when a deploy updates it (#621)."""
+    import yaml
+
+    from anolis_workbench.core import fleet
+
+    registry = tmp_path / "fleet.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "defaults": {"systemd": True},
+                "targets": [
+                    {
+                        "name": "rig-a",
+                        "host": "10.0.0.5",
+                        "project": "old",
+                        "template": "sim-quickstart",
+                        "key": "~/.ssh/rig",
+                    },
+                    {"name": "rig-b", "host": "10.0.0.6", "project": "other"},
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(fleet, "_FLEET_REGISTRY_PATH", registry)
+
+    fleet.auto_register_host(host="10.0.0.5", project="new", template="bioreactor-manual")
+
+    raw = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    assert raw["defaults"] == {"systemd": True}
+    assert raw["targets"] == [
+        {"name": "rig-a", "host": "10.0.0.5", "project": "new", "template": "bioreactor-manual", "key": "~/.ssh/rig"},
+        {"name": "rig-b", "host": "10.0.0.6", "project": "other"},
+    ]
