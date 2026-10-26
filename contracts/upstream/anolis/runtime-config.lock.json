@@ -3,19 +3,19 @@
   "source": {
     "repo": "anolishq/anolis",
     "path": "schemas/runtime/runtime-config.schema.json",
-    "tag": "v0.1.52"
+    "tag": "v0.1.53"
   },
   "distribution": {
     "mode": "release-artifact",
     "asset_format": "tar-member",
     "release": {
       "repo": "anolishq/anolis",
-      "tag": "v0.1.52",
-      "asset": "anolis-0.1.52-runtime-config-schema.tar.gz",
+      "tag": "v0.1.53",
+      "asset": "anolis-0.1.53-runtime-config-schema.tar.gz",
       "manifest_asset": "runtime-config-schema-manifest.json"
     },
-    "schema_sha256": "3cd9d57c80cfa032e0af87bd3e2d5f567ca946abdcef0a7cf63863f0f7d5f89f",
-    "asset_sha256": "d71a91d91350fb523700c698fb735deaccf078708692d9f2191bfcf63dbe4028"
+    "schema_sha256": "60a60ca215ee808d96fa6163b6df08b18d43f52a79429b8bff0644fe85ab8e76",
+    "asset_sha256": "e924c25530e5406abc96cc7340050f9cf7f5307014c72c0aac2e2261910fc9d5"
   },
-  "synced_at_utc": "2026-10-25T10:57:23Z"
+  "synced_at_utc": "2026-10-26T05:14:28Z"
 }
