@@ -13,6 +13,62 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-26
+
+Upgrade notes:
+
+- **Contracts pin anolis 0.1.55 and anolis-provider-bread 0.9.2** (#642,
+  #643). The sim quickstart template pins runtime 0.1.55.
+- **`encoders` is removed from bread RLHT rows on load and on save.**
+  bread 0.9.2's schema forbids it on an RLHT, and 0.20.x wrote
+  `encoders: true` on every new bread device row. Loading such a project
+  adds a note: "Removed encoders from RLHT device(s) rlht0 of provider
+  'bread0'; it applies to DCMT only, and bread ignores it on an RLHT. Save
+  to apply." A DCMT's value is kept.
+- **Operate shows "⚠ Stop not reaching *device*"** when anolis 0.1.55
+  reports that a stop-chain device's declared expectation is contradicted
+  while the stop is in force. A runtime before 0.1.55 never reports one,
+  and nothing new is shown.
+
+### Added
+
+- Operate shows the emergency stop the runtime observes through
+  `safety.stop_chain`, in the software stop's row (#631, #641): in force,
+  status unknown, released (clear the latch to reset), or clear. While it
+  is in force, devices in its scope show STOPPED rather than a fault, and
+  Runtime Status names a device the stop removed as stopped, not lost. The
+  reset is the existing clear, which the runtime refuses, with its reason,
+  until it reads the stop released. A `stop_chain_change` event re-reads
+  the status. A project without a stop chain shows nothing new.
+- "⚠ Stop not reaching *device*" in that row for each mismatch anolis
+  0.1.55 reports (#631, #644), with the expected behaviour, the runtime's
+  reason and what to check behind its ⓘ. In the device list, such a device
+  shows STOP NOT REACHING instead of STOPPED, and each device with a
+  declared expectation shows it ("expects power loss" or "expects estop
+  report"). Runtime Status lists it, and a `stop_chain_mismatch` event
+  re-reads the status.
+
+### Changed
+
+- Contracts synced to anolis 0.1.55 (#642): the runtime status's
+  `stop_chain` gains `expectations` and `mismatches`, `/v0/events`
+  documents `stop_chain_mismatch`, and the runtime config accepts
+  `safety.stop_chain.devices` entries with an `expect`.
+- The bread config schema synced to 0.9.2 (#640, #643). A new RLHT row has
+  no `encoders` and no "Encoders fitted" box; a DCMT row still offers it.
+
+### Fixed
+
+- Fleet updates a host's row on every deploy to it (#621, #638). It showed
+  the first project ever deployed there, and `sim-quickstart` as the
+  template of projects that were never made from one. A row now takes the
+  project's own template, or shows "—" when it has none.
+- "Unsaved changes" shows only while the draft differs from the project
+  as last loaded or saved (#622, #639). Undoing an edit by hand left the
+  mark, and leaving the page raised the browser's "Leave site?" dialog.
+- Saving a project with `encoders` on a bread RLHT row no longer fails
+  validation against bread 0.9.2's schema (#640, #643).
+
 ## [0.21.0] - 2026-10-26
 
 ### Added
