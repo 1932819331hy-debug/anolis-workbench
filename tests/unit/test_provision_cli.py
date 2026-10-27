@@ -462,3 +462,140 @@ def test_update_shows_an_unverified_install_sh(success: bool, monkeypatch, capsy
     monkeypatch.setattr(sys, "argv", ["anolis-provision", "update"])
     assert provision_cli._run_update(provision_cli._parse_args()) == (0 if success else 1)
     assert f"\n{_UNVERIFIED}\n" in capsys.readouterr().err
+
+
+class TestInstallVariant:
+    """`anolis-provision install --variant <key>` picks the runtime variant install.sh
+    installs, as the workbench's Deploy does (#647). Without it, install.sh's default
+    `manual` is installed."""
+
+    TEMPLATE = pathlib.Path(__file__).parents[2] / "anolis_workbench" / "templates" / "sim-quickstart"
+
+    @staticmethod
+    def _install(monkeypatch: pytest.MonkeyPatch, project_dir: pathlib.Path, *flags: str) -> int:
+        from anolis_workbench.cli import provision_cli
+
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: project_dir)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "install", *flags])
+        return provision_cli._run_install(provision_cli._parse_args())
+
+    @staticmethod
+    def _forwarding(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        from anolis_workbench.cli import provision_cli
+        from anolis_workbench.core import deploy
+
+        seen: dict[str, object] = {}
+
+        def _deploy_local(**kwargs: object) -> object:
+            seen.update(kwargs)
+            return deploy.DeployResult(project_name="p", runtime_version="0.1.55", prefix="/opt/anolis", output="")
+
+        monkeypatch.setattr(provision_cli.deploy, "deploy_local", _deploy_local)
+        return seen
+
+    def test_a_named_variant_reaches_deploy(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen = self._forwarding(monkeypatch)
+        assert self._install(monkeypatch, tmp_path, "--variant", "telemetry") == 0
+        assert seen["variant"] == "telemetry"
+
+    def test_no_variant_leaves_install_sh_s_default(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = self._forwarding(monkeypatch)
+        assert self._install(monkeypatch, tmp_path) == 0
+        assert seen["variant"] is None
+
+    def test_an_unknown_variant_fails_before_anything_is_installed(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The real deploy_local, on a project whose runtime_profiles has only `manual`."""
+        import shutil
+
+        from anolis_workbench.core import deploy
+
+        project_dir = tmp_path / "sim-quickstart"
+        shutil.copytree(self.TEMPLATE, project_dir)
+
+        def _never(*args: object, **kwargs: object) -> object:
+            pytest.fail("install.sh was fetched or run for an unknown variant")
+
+        monkeypatch.setattr(deploy, "fetch_install_sh", _never)
+        monkeypatch.setattr(deploy, "_run_install_sh", _never)
+
+        assert self._install(monkeypatch, project_dir, "--variant", "telemetry") == 1
+        err = capsys.readouterr().err
+        assert "variant 'telemetry' not in the profile's runtime_profiles (known: manual)" in err, err
+
+
+class TestRemoteVariant:
+    """`anolis-provision remote --variant <key>`, as install's (#647)."""
+
+    TEMPLATE = TestInstallVariant.TEMPLATE
+
+    @staticmethod
+    def _remote(monkeypatch: pytest.MonkeyPatch, project_dir: pathlib.Path, ran: list[list[str]], *flags: str) -> int:
+        from anolis_workbench.cli import provision_cli
+        from anolis_workbench.core import executor as executor_module
+
+        class _FakeSSH:
+            def __init__(self, **kwargs: object) -> None:
+                pass
+
+            def run(self, cmd: list[str], **kwargs: object) -> executor_module.RunResult:
+                ran.append(list(cmd))
+                return executor_module.RunResult(returncode=0, stdout="x86_64\n", stderr="")
+
+        monkeypatch.setattr(executor_module, "SubprocessSSHExecutor", _FakeSSH)
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: project_dir)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "remote", "--target", "pi@host", *flags])
+        return provision_cli._run_remote(provision_cli._parse_args())
+
+    @staticmethod
+    def _forwarding(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        from anolis_workbench.cli import provision_cli
+        from anolis_workbench.core import deploy
+
+        seen: dict[str, object] = {}
+
+        def _deploy_remote(**kwargs: object) -> object:
+            seen.update(kwargs)
+            return deploy.DeployResult(project_name="p", runtime_version="0.1.55", prefix="/opt/anolis", output="")
+
+        monkeypatch.setattr(provision_cli.deploy, "deploy_remote", _deploy_remote)
+        return seen
+
+    def test_a_named_variant_reaches_deploy(self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen = self._forwarding(monkeypatch)
+        assert self._remote(monkeypatch, tmp_path, [], "--variant", "telemetry") == 0
+        assert seen["variant"] == "telemetry"
+
+    def test_no_variant_leaves_install_sh_s_default(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = self._forwarding(monkeypatch)
+        assert self._remote(monkeypatch, tmp_path, []) == 0
+        assert seen["variant"] is None
+
+    def test_an_unknown_variant_fails_before_anything_is_pushed_or_run(
+        self, tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The real deploy_remote. Only the connectivity check reaches the target."""
+        import shutil
+
+        from anolis_workbench.core import deploy
+
+        project_dir = tmp_path / "sim-quickstart"
+        shutil.copytree(self.TEMPLATE, project_dir)
+
+        def _never(*args: object, **kwargs: object) -> object:
+            pytest.fail("the project was pushed, or install.sh fetched or run, for an unknown variant")
+
+        monkeypatch.setattr(deploy, "fetch_install_sh", _never)
+        monkeypatch.setattr(deploy, "_push_dir", _never)
+        monkeypatch.setattr(deploy, "_run_install_sh", _never)
+
+        ran: list[list[str]] = []
+        assert self._remote(monkeypatch, project_dir, ran, "--variant", "telemetry") == 1
+        err = capsys.readouterr().err
+        assert "variant 'telemetry' not in the profile's runtime_profiles (known: manual)" in err, err
+        assert ran == [["uname", "-m"]], ran

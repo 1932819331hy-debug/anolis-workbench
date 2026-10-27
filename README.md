@@ -127,6 +127,15 @@ with `install.sh --local`, or deploy online with `anolis-provision
 install|remote`. The roles and both paths are in
 `docs/commissioning-handoff-runbook.md`.
 
+`anolis-provision install --variant <key>` (and `remote --variant <key>`)
+installs that runtime variant, a key of the project's `runtime_profiles`, as
+Deploy does; without it,
+`install.sh` installs `manual`. An unknown key fails before anything is
+installed. A target that already has a runtime config keeps it, and
+`install.sh` says the variant was not applied. A bundle carries every variant:
+choose one when installing it, with `install.sh --local <bundle> --variant
+<key>`.
+
 Provision with observability (InfluxDB + Grafana installed natively on the
 target by the runtime's `install.sh --with-observability`):
 
