@@ -689,10 +689,9 @@ def stop() -> None:
 def restart(name: str, project_dir: pathlib.Path) -> None:
     """Kill and relaunch the running project.
 
-    Re-reads the saved project: it picks the launch variant's rendered YAML,
-    and renders it again if that file is missing. So the saved project is
-    validated first, as launch() does, before the running runtime is stopped
-    (#414).
+    Re-reads the saved project and renders the launch variant's YAML again,
+    as launch() does. So the saved project is validated first, as launch()
+    does, before the running runtime is stopped (#414).
     """
     current = _current_runtime_snapshot(clean_stale=True)
     if not current["running"]:
@@ -715,6 +714,10 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
     errors = canonical_validator.validate_project(system)
     if errors:
         raise LaunchValidationError(errors)
+    # Rendered again, as launch() does, so a file an older workbench wrote is
+    # never handed to the runtime (it may lack runtime.data_dir, #562). Before
+    # stop(), so a project that cannot render leaves the runtime running.
+    launch_config = str(materialize_launch_config(project_dir, system))
 
     stop()
     time.sleep(0.5)  # Allow log reader thread to flush and clean up
@@ -727,11 +730,6 @@ def restart(name: str, project_dir: pathlib.Path) -> None:
     runtime_exe = _resolve_executable_path(host.get("runtime_executable", ""))
     if runtime_exe is None:
         raise RuntimeError("Runtime executable path is missing (set it in the project's host paths).")
-    launch_config = str(
-        project_dir / canonical.LAUNCH_DIR / "launch" / canonical.variant_filename(launch_variant(system))
-    )
-    if not pathlib.Path(launch_config).is_file():
-        launch_config = str(materialize_launch_config(project_dir, system))
     cmd = [str(runtime_exe), "--config", launch_config]
 
     proc = subprocess.Popen(
@@ -942,6 +940,21 @@ def materialize_launch_config(project_dir: pathlib.Path, document: dict) -> path
             match = canonical.PROJECT_PATH_RE.fullmatch(behavior)
             if match is not None:
                 automation["behavior_tree"] = str((project_dir / match.group(2) / match.group(3)).resolve())
+
+    # The runtime resolves a default or relative runtime.data_dir against the
+    # config file's directory (anolishq/anolis#562), which is inside the
+    # project, and a re-provision replaces the project directory. Name the
+    # directory a launch has always used, since the runtime starts in
+    # DATA_ROOT, so the e-stop latch and the run journal stay where they are.
+    runtime_section = projected.get("runtime")
+    if not isinstance(runtime_section, dict):
+        runtime_section = {}
+        projected = {"runtime": runtime_section, **{k: v for k, v in projected.items() if k != "runtime"}}
+    data_dir = runtime_section.get("data_dir")
+    if not data_dir:
+        runtime_section["data_dir"] = str(paths_module.DATA_ROOT / "anolis-data")
+    elif not pathlib.Path(str(data_dir)).is_absolute():
+        runtime_section["data_dir"] = str(paths_module.DATA_ROOT / str(data_dir))
 
     out = project_dir / canonical.LAUNCH_DIR / "launch"
     out.mkdir(parents=True, exist_ok=True)
