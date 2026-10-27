@@ -13,6 +13,80 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-27
+
+Upgrade notes:
+
+- **Contracts pin anolis 0.1.56 and anolis-provider-bread 0.9.3** (#635,
+  #636). The sim quickstart template pins runtime 0.1.56. Neither release
+  changed a schema the workbench vendors: bread's config schema differs
+  from 0.9.2's only in its `provider_version`.
+- **Re-provisioning a project from `--system` no longer needs `--force`
+  when the workspace copy holds no edits of the operator's** (#650, #660).
+  Every provisioning now writes a `.provisioned.json` record into the
+  workspace project, a sha256 per file. A project provisioned by an
+  earlier workbench has no record, so its local edits can't be told apart
+  from changes in `--system`. If its files match `--system`, re-running
+  `install --system` writes the record. If any differ, it refuses once:
+
+  ```text
+  Project '<name>' at <dir> has no record of what was last provisioned into
+  it (an earlier workbench provisioned it) … These files differ from it:
+  <files>. Check them, then re-provision once with --force; later
+  re-provisions update it without --force.
+  ```
+
+- **`POST /api/projects/<name>/stop` returns 409 for the installed runtime
+  service** (#661), which it answered `{"ok": true}` for without stopping
+  it. Commission's Stop and Restart reach that service through the new
+  `POST /api/provision/service`.
+
+### Added
+
+- **`anolis-provision install --variant KEY`**, and on `remote` (#647,
+  #648), a key of the project's `runtime_profiles`. An unknown key fails
+  before `install.sh` is fetched. Without it, `install.sh` installs its
+  default, `manual`, as before. A staged bundle carries every variant, so
+  `bundle` doesn't take it.
+- **A guided clear for watchdog-tripped boards in Operate** (#572, #658).
+  After downtime longer than bread's command watchdog, every board comes up
+  `WATCHDOG_TRIP` and refuses every command. Operate lists the boards whose
+  health reports `watchdog_tripped`, and walks each through its clear in
+  order, one confirmed step at a time: release the software stop, MANUAL,
+  `clear_watchdog_trip`, then, on a DCMT, release its brakes, which can be
+  left on.
+  A refused step shows the runtime's error and can be retried.
+- **Stop and Restart for the installed runtime service** (#581, #661).
+  Commission offers them for the `anolis-runtime` systemd service that
+  `install.sh` installs, locally with the sudo password or on a remote host
+  over SSH. `/api/status` reports such a runtime as `external`. Replacing
+  its config from the workbench waits for a workbench release that uses
+  anolis 0.1.56's `install.sh --replace-config`.
+
+### Fixed
+
+- **`install --system` updates a provisioned project without `--force`**
+  (#650, #660): an unchanged copy is up to date, and a pin bump updates it
+  and names `machine-profile.yaml`. A local edit still refuses, names the
+  edited file, and points to `--force`.
+- **The install summary shows `install.sh`'s whole refusal, its checksum
+  result and its log** (#649, #651). The summary that
+  `anolis-provision install` and `remote` and Commission's Deploy show cut
+  off anolis 0.1.55's recovery instructions for a host whose InfluxDB
+  credentials are gone after the first line. It now keeps the whole block,
+  adds `install.sh`'s checksum result, and names a log of its full output;
+  a failed install's error names that log.
+- **"Reaching Grafana" says the admin password is unknown after a failed
+  reset** (#659), as anolis 0.1.56's `install.sh` summary does, instead of
+  pointing to `GRAFANA_ADMIN_PASSWORD` in `observability.env`, which may not
+  log in then.
+
+### Changed
+
+- Docs: statements the source contradicted are corrected (#662).
+- CI: the Frontend job runs in Playwright's image, and the Desktop job
+  caches its Tauri `.deb`s (#544, #646); routine dependency maintenance.
+
 ## [0.22.0] - 2026-10-26
 
 Upgrade notes:
