@@ -172,6 +172,8 @@
       observability?: string[];
       grafana_access?: string[];
       install_sh_warning?: string | null;
+      verify?: string[];
+      log_path?: string | null;
     };
     host_preflight?: string[];
     reboot_pending?: boolean;
@@ -188,6 +190,8 @@
     observability: string[];
     grafanaAccess: string[];
     installShWarning: string;
+    verify: string[];
+    logPath: string;
   };
   // The project's pins beside what the target has installed (#567). The
   // verdicts are the server's, the same ones a deploy acts on.
@@ -565,6 +569,8 @@
         observability: data.summary?.observability ?? [],
         grafanaAccess: data.summary?.grafana_access ?? [],
         installShWarning: data.summary?.install_sh_warning ?? "",
+        verify: data.summary?.verify ?? [],
+        logPath: data.summary?.log_path ?? "",
       };
     }
     if (data.stage === "error" || data.stage === "status") {
@@ -580,6 +586,8 @@
         observability: [],
         grafanaAccess: [],
         installShWarning: "",
+        verify: [],
+        logPath: "",
       };
     }
     return null;
@@ -665,6 +673,8 @@
             observability: [],
             grafanaAccess: [],
             installShWarning: "",
+            verify: [],
+            logPath: "",
           });
         };
       });
@@ -749,6 +759,15 @@
       {#if outcome.installShWarning}
         <p class="deploy-warning">{outcome.installShWarning}</p>
       {/if}
+      {#if outcome.verify.length}
+        <pre class="deploy-output">{#each outcome.verify as line, i (i)}<span
+              class="deploy-line"
+              class:deploy-warning={!line.startsWith("✓")}>{line}</span
+            >{/each}</pre>
+      {/if}
+      {#if outcome.logPath}
+        <p>install.sh's full output: <code>{outcome.logPath}</code></p>
+      {/if}
       {#if outcome.runtimeConfigKept}
         <p>The existing runtime config was kept; the runtime runs it, not this project's.</p>
       {/if}
@@ -776,7 +795,7 @@
       {#if outcome.observability.length}
         <!-- install.sh warns and still exits 0 when observability fails, so
              a "Deployed" without these lines would hide the failure. -->
-        {#if outcome.observability.some((line) => line.startsWith("⚠"))}
+        {#if outcome.observability.some((line) => line.startsWith("⚠") || line.startsWith("✗"))}
           <p class="deploy-warning">
             Observability needs attention: install.sh reported a problem.
           </p>
@@ -785,7 +804,7 @@
         {/if}
         <pre class="deploy-output">{#each outcome.observability as line, i (i)}<span
               class="deploy-line"
-              class:deploy-warning={line.startsWith("⚠")}>{line}</span
+              class:deploy-warning={line.startsWith("⚠") || line.startsWith("✗")}>{line}</span
             >{/each}</pre>
       {/if}
       {#if outcome.grafanaAccess.length}

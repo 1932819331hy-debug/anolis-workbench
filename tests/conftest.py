@@ -15,7 +15,16 @@ from typing import Any, Callable
 
 import pytest
 
-from anolis_workbench.core import canonical
+from anolis_workbench.core import canonical, deploy
+
+
+@pytest.fixture(autouse=True)
+def _install_log_dir(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> pathlib.Path:
+    """Deploys keep install.sh's output under DATA_ROOT; keep tests' out of $HOME (#649)."""
+    logs = tmp_path_factory.mktemp("install-logs")
+    monkeypatch.setattr(deploy, "INSTALL_LOG_DIR", logs, raising=False)
+    return logs
+
 
 # Pins the fixtures author. They are AUTHORED data (#255 decision 1) — nothing
 # in the deploy path resolves them from the network any more.

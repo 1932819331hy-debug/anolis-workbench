@@ -144,6 +144,46 @@ def test_done_event_carries_install_sh_observability_lines(
 
 
 @pytest.mark.parametrize("remote", [False, True])
+def test_done_event_carries_the_verify_line_and_the_log(calls, monkeypatch: pytest.MonkeyPatch, remote: bool) -> None:
+    """#649: Commission shows the checksum result and where install.sh's full
+    output is, beside the whole observability block."""
+    output = (pathlib.Path(__file__).parent.parent / "fixtures" / "install-sh" / "credentials-gone.txt").read_text(
+        encoding="utf-8"
+    )
+
+    def _deploy(**kwargs: Any) -> deploy.DeployResult:
+        return deploy.DeployResult(
+            project_name="rig",
+            runtime_version="0.1.55",
+            prefix="/opt/anolis",
+            output=output,
+            log_path="/home/op/.anolis/logs/install-rig-20261027T020000Z.log",
+        )
+
+    class _Executor:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(deploy, "deploy_local", _deploy)
+    monkeypatch.setattr(deploy, "deploy_remote", _deploy)
+    monkeypatch.setattr(provision, "ParamikoSSHExecutor", _Executor)
+    monkeypatch.setattr("anolis_workbench.core.fleet.auto_register_host", lambda **kwargs: None)
+    job = provision.ProvisionJob(job_id="j649")
+    if remote:
+        provision._run_remote_job(job, {"project": "rig", "target": "pi@rig", "with_observability": True})
+    else:
+        provision._run_install_job(job, {"project": "rig", "with_observability": True})
+
+    summary = job.events[-1]["summary"]
+    assert summary["verify"] == ["✓ verify: all checksums pass"]
+    assert summary["log_path"] == "/home/op/.anolis/logs/install-rig-20261027T020000Z.log"
+    assert any("sudo -H influx auth create" in line for line in summary["observability"])
+
+
+@pytest.mark.parametrize("remote", [False, True])
 def test_done_event_carries_install_sh_health_lines(calls, monkeypatch: pytest.MonkeyPatch, remote: bool) -> None:
     """install.sh warns and still exits 0 when a provider is not running, so
     the summary must carry its health lines or the shortfall goes unseen."""

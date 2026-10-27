@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import pathlib
 import re
 import shlex
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -28,7 +30,7 @@ import yaml
 
 from anolis_workbench.core import canonical, machine_profile, releases
 from anolis_workbench.core.executor import Executor, LocalExecutor
-from anolis_workbench.core.paths import DEFAULT_INSTALL_PREFIX
+from anolis_workbench.core.paths import DATA_ROOT, DEFAULT_INSTALL_PREFIX
 from anolis_workbench.core.release_verify import ReleaseVerificationError, verify_install_sh
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,9 @@ INSTALL_TIMEOUT_S = 1800.0
 # The Debian convention for "a reboot is pending" (tmpfs, so a reboot clears
 # it). A project's host prep writes it; the workbench only reports it.
 REBOOT_REQUIRED_PATH = "/run/reboot-required"
+# Every deploy keeps install.sh's whole output here, on the machine that ran
+# the deploy; the summaries show only parts of it (#649).
+INSTALL_LOG_DIR = DATA_ROOT / "logs"
 
 # install.sh prefixes every host-preflight line with this, and indents the
 # per-requirement detail under it.
@@ -100,6 +105,8 @@ class DeployResult:
     runtime_config_kept: bool = False
     # Set when install.sh ran without a SHA256SUMS line to check it against.
     install_sh_warning: str | None = None
+    # Where install.sh's whole output was kept; None when it could not be written.
+    log_path: str | None = None
 
 
 def materialize_project_dir(
@@ -427,8 +434,11 @@ def host_preflight_block(stdout: str) -> list[str]:
 _OBSERVABILITY_MARKS = ("observability:", "Grafana:", "Grafana bind unchanged", "InfluxDB:")
 # install.sh's log_info indents every line by two spaces, so a summary line
 # such as "  Hostname:" starts with spaces too. Its detail lines (a log_info
-# message that itself starts with two spaces) start with four.
+# message that itself starts with two spaces) start with four. A status line
+# (a glyph in the first column) keeps every indented line after it: a
+# refusal's instructions are plain log_info lines (#649).
 _DETAIL_INDENT = "    "
+_LOG_INFO_INDENT = "  "
 
 
 def observability_lines(stdout: str) -> list[str]:
@@ -453,18 +463,28 @@ def health_lines(stdout: str) -> list[str]:
     return _marked_lines(stdout, lambda line: _HEALTH_RE.match(line) is not None)
 
 
+# install.sh's phase_verify line: the bundle's checksums against
+# checksums.sha256, one line per failure.
+_VERIFY_RE = re.compile(r"^\S+ verify:")
+
+
+def verify_lines(stdout: str) -> list[str]:
+    """install.sh's checksum result for the bundle it installed, ANSI stripped."""
+    return _marked_lines(stdout, lambda line: _VERIFY_RE.match(line) is not None)
+
+
 def _marked_lines(stdout: str, is_mark: Callable[[str], bool]) -> list[str]:
     lines = _ANSI_RE.sub("", stdout).splitlines()
     out: list[str] = []
-    in_block = False
+    indent: str | None = None
     for line in lines:
         if is_mark(line):
             out.append(line)
-            in_block = True
-        elif in_block and line.startswith(_DETAIL_INDENT) and line.strip():
+            indent = _DETAIL_INDENT if line.startswith(" ") else _LOG_INFO_INDENT
+        elif indent is not None and line.startswith(indent) and line.strip():
             out.append(line)
         else:
-            in_block = False
+            indent = None
     return out
 
 
@@ -750,14 +770,36 @@ def _reboot_pending(executor: Executor) -> bool:
         return False
 
 
+def _keep_install_log(project_name: str, stdout: str, stderr: str) -> str | None:
+    """Write install.sh's whole output to INSTALL_LOG_DIR, owner-only. Never
+    fails the deploy: a log that cannot be written is reported as None."""
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", project_name)
+    try:
+        INSTALL_LOG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+        path = INSTALL_LOG_DIR / f"install-{safe_name}-{stamp}.log"
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(stdout)
+            if stderr:
+                fh.write("\n--- stderr ---\n" + stderr)
+    except OSError:
+        logger.warning("could not keep install.sh's output in %s", INSTALL_LOG_DIR, exc_info=True)
+        return None
+    return str(path)
+
+
 def _run_install_sh(
     executor: Executor,
     install_sh: str,
     args: list[str],
+    project_name: str,
     progress: ProgressCallback | None,
-) -> tuple[str, list[str], bool]:
-    """Run install.sh; return (stdout, host-preflight block worth showing, reboot pending)."""
+) -> tuple[str, list[str], bool, str | None]:
+    """Run install.sh; return (stdout, host-preflight block worth showing,
+    reboot pending, the log holding its whole output)."""
     result = executor.run(["bash", install_sh, *args], sudo=True, timeout=INSTALL_TIMEOUT_S)
+    log_path = _keep_install_log(project_name, result.stdout, result.stderr)
     block = host_preflight_block(result.stdout)
     reboot = _reboot_pending(executor)
     if result.returncode != 0:
@@ -772,10 +814,12 @@ def _run_install_sh(
         message = f"install.sh failed (exit {result.returncode}):\n{detail}"
         if reboot:
             message += f"\nA reboot is pending on the target ({REBOOT_REQUIRED_PATH}); reboot it, then deploy again."
+        if log_path:
+            message += f"\nFull install.sh output: {log_path}"
         raise DeployError(message, host_preflight=block, reboot_pending=reboot)
     if progress:
         progress("install", "install.sh completed")
-    return result.stdout, (block if _preflight_needs_attention(block) else []), reboot
+    return result.stdout, (block if _preflight_needs_attention(block) else []), reboot, log_path
 
 
 def deploy_local(
@@ -812,7 +856,7 @@ def deploy_local(
         if notice := _existing_config_notice(executor, prefix, variant):
             _progress("existing-config", notice)
         _progress("install", f"Running install.sh --project (runtime v{mat.runtime_version})")
-        output, preflight, reboot = _run_install_sh(
+        output, preflight, reboot, log_path = _run_install_sh(
             executor,
             str(install_sh),
             _install_args(
@@ -825,6 +869,7 @@ def deploy_local(
                 variant=variant,
                 allow_unmet_host=allow_unmet_host,
             ),
+            project_name,
             progress_callback,
         )
     preserved = preserved_lines(output)
@@ -838,6 +883,7 @@ def deploy_local(
         preserved=preserved,
         runtime_config_kept=runtime_config_kept(preserved),
         install_sh_warning=warning,
+        log_path=log_path,
     )
 
 
@@ -880,7 +926,7 @@ def deploy_remote(
         if notice := _existing_config_notice(executor, prefix, variant):
             _progress("existing-config", notice)
         _progress("install", f"Running install.sh --project on target (runtime v{mat.runtime_version})")
-        output, preflight, reboot = _run_install_sh(
+        output, preflight, reboot, log_path = _run_install_sh(
             executor,
             remote_install,
             _install_args(
@@ -893,6 +939,7 @@ def deploy_remote(
                 variant=variant,
                 allow_unmet_host=allow_unmet_host,
             ),
+            project_name,
             progress_callback,
         )
     preserved = preserved_lines(output)
@@ -906,6 +953,7 @@ def deploy_remote(
         preserved=preserved,
         runtime_config_kept=runtime_config_kept(preserved),
         install_sh_warning=warning,
+        log_path=log_path,
     )
 
 

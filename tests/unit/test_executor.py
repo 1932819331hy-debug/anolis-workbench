@@ -142,7 +142,7 @@ class TestLocalExecutorSudoPassword:
         install_sh.write_text('read -r line; echo "read: [$line]"; exit 1\n')
 
         def _deploy(**kwargs: Any) -> None:
-            deploy._run_install_sh(kwargs["executor"], str(install_sh), [], None)
+            deploy._run_install_sh(kwargs["executor"], str(install_sh), [], "leak", None)
 
         monkeypatch.setattr(provision, "_prepare_workspace", lambda params, progress: tmp_path)
         monkeypatch.setattr(deploy, "_reboot_pending", lambda executor: False)

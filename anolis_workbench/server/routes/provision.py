@@ -143,6 +143,8 @@ def _run_install_job(job: ProvisionJob, params: dict[str, Any], sudo_password: b
                     "install_sh_warning": result.install_sh_warning,
                     "health": deploy.health_lines(result.output),
                     "observability": deploy.observability_lines(result.output),
+                    "verify": deploy.verify_lines(result.output),
+                    "log_path": result.log_path,
                     "grafana_access": deploy.grafana_access(result.output),
                 },
             }
@@ -205,6 +207,8 @@ def _run_remote_job(job: ProvisionJob, params: dict[str, Any]) -> None:
                     "install_sh_warning": result.install_sh_warning,
                     "health": deploy.health_lines(result.output),
                     "observability": deploy.observability_lines(result.output),
+                    "verify": deploy.verify_lines(result.output),
+                    "log_path": result.log_path,
                     "grafana_access": deploy.grafana_access(
                         result.output,
                         ssh_target=target,

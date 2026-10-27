@@ -585,6 +585,41 @@ describe('Commission.svelte — Deploy to device (#275)', () => {
     expect(screen.getByText(/Grafana bind unchanged/)).not.toHaveClass('deploy-warning');
   });
 
+  it("shows a refusal's recovery lines, the checksum result and the log (#649)", async () => {
+    setup();
+    await fireEvent.input(screen.getByLabelText('Target (user@host)'), {
+      target: { value: 'pi@rig' },
+    });
+    await fireEvent.click(screen.getByLabelText('Also install observability (InfluxDB + Grafana)'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Deploy' }));
+    await waitFor(() => expect(DrivenEventSource.instances.length).toBe(1));
+
+    // tests/fixtures/install-sh/credentials-gone.txt, through deploy's filters
+    DrivenEventSource.instances[0].emit({
+      stage: 'done',
+      summary: {
+        runtime_version: '0.1.55',
+        verify: ['✓ verify: all checksums pass'],
+        log_path: '/home/op/.anolis/logs/install-rig-20261027T020000Z.log',
+        observability: [
+          '→ observability: influxdb already set up — bucket/tokens left alone',
+          '✗ observability: influxdb is already set up, but its credentials are gone (no tokens in /etc/anolis/observability.env) — Grafana not provisioned',
+          '  An uninstall by an earlier install.sh deleted them and kept the instance. To recover,',
+          '    sudo -H influx auth create --org anolis --write-bucket "${id}" --description \'anolis-runtime telemetry write\'',
+        ],
+        grafana_access: [],
+      },
+    });
+    expect(await screen.findByText('Deployed')).toBeInTheDocument();
+    expect(screen.getByText(/Observability needs attention/)).toBeInTheDocument();
+    expect(screen.getByText(/credentials are gone/)).toHaveClass('deploy-warning');
+    expect(screen.getByText(/--write-bucket/)).toBeInTheDocument();
+    expect(screen.getByText('✓ verify: all checksums pass')).toBeInTheDocument();
+    expect(document.getElementById('deploy-result')?.textContent).toContain(
+      '/home/op/.anolis/logs/install-rig-20261027T020000Z.log',
+    );
+  });
+
   it('shows install.sh observability lines without a warning when all went well', async () => {
     setup();
     await fireEvent.input(screen.getByLabelText('Target (user@host)'), {

@@ -157,6 +157,34 @@ class TestObservabilityFlag:
         assert "GRAFANA_ADMIN_PASSWORD" not in out
         assert "WARNING" in err and "observability" in err
 
+    def test_install_shows_a_refusal_s_recovery_lines_the_verify_line_and_the_log(
+        self, tmp_path, monkeypatch, capsys
+    ) -> None:
+        """#649: anolis 0.1.55's refusal is one ✗ line and log_info lines; all
+        of it reaches the summary, with the checksum result and the full log."""
+        from anolis_workbench.cli import provision_cli
+        from anolis_workbench.core import deploy
+
+        output = (self._FIXTURES / "credentials-gone.txt").read_text(encoding="utf-8")
+        result = deploy.DeployResult(
+            project_name="p",
+            runtime_version="0.1.55",
+            prefix="/opt/anolis",
+            output=output,
+            log_path="/home/op/.anolis/logs/install-p-20261027T020000Z.log",
+        )
+        monkeypatch.setattr(provision_cli, "_provision_workspace", lambda args: tmp_path)
+        monkeypatch.setattr(provision_cli.deploy, "deploy_local", lambda **kwargs: result)
+        monkeypatch.setattr(sys, "argv", ["anolis-provision", "install", "--with-observability"])
+        assert provision_cli._run_install(provision_cli._parse_args()) == 0
+        out, err = capsys.readouterr()
+        assert "    ✓ verify: all checksums pass" in out
+        assert "credentials are gone" in out
+        assert "      sudo -H influx auth create --org anolis --write-bucket" in out
+        assert "re-run this install." in out
+        assert "install.sh output: /home/op/.anolis/logs/install-p-20261027T020000Z.log" in out
+        assert "WARNING" in err and "observability" in err
+
     def test_remote_surfaces_the_grafana_lines(self, tmp_path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
         from anolis_workbench.cli import provision_cli
         from anolis_workbench.core import deploy
