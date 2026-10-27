@@ -183,6 +183,8 @@ class _Handler(BaseHTTPRequestHandler):
             provision.start_remote(self)
         elif path == "/api/provision/check-target":
             provision.check_target(self)
+        elif path == "/api/provision/service":
+            provision.control_service(self)
         elif path == "/api/provision/bundle":
             provision.start_bundle(self)
         elif path == "/api/update":

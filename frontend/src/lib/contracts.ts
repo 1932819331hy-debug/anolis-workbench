@@ -33,6 +33,8 @@ export interface RuntimeStatus extends UnknownRecord {
   active_project: string | null;
   running: boolean;
   pid?: number | null;
+  /** A runtime the workbench did not launch, such as an installed service (wb#581). */
+  external?: boolean;
   composer?: {
     host: string;
     port: number;

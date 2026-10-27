@@ -789,6 +789,27 @@ def _keep_install_log(project_name: str, stdout: str, stderr: str) -> str | None
     return str(path)
 
 
+# The installed runtime's systemd unit (install.sh --project writes it).
+RUNTIME_SERVICE = "anolis-runtime"
+SERVICE_TIMEOUT_S = 120.0
+_SERVICE_ACTIONS = ("stop", "restart")
+
+
+def control_runtime_service(executor: Executor, action: str) -> str:
+    """Stop or restart the installed anolis-runtime service (wb#581), then
+    return what `systemctl is-active` says about it."""
+    if action not in _SERVICE_ACTIONS:
+        raise ValueError(f"action must be stop or restart, not {action!r}")
+    result = executor.run(["systemctl", action, RUNTIME_SERVICE], sudo=True, timeout=SERVICE_TIMEOUT_S)
+    if result.returncode != 0:
+        if "incorrect password attempt" in result.stderr:
+            raise DeployError("sudo rejected the password; systemctl did not run. Check it and try again.")
+        detail = "\n".join(_ANSI_RE.sub("", result.stdout + "\n" + result.stderr).strip().splitlines()[-10:])
+        raise DeployError(f"systemctl {action} {RUNTIME_SERVICE} failed (exit {result.returncode}): {detail}")
+    state = executor.run(["systemctl", "is-active", RUNTIME_SERVICE], timeout=30.0)
+    return state.stdout.strip() or "unknown"
+
+
 def _run_install_sh(
     executor: Executor,
     install_sh: str,

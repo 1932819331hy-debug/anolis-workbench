@@ -303,6 +303,75 @@ def start_remote(handler: Any) -> None:
     handler._json(202, {"job_id": job.job_id})
 
 
+# What `systemctl is-active` may say once each action has done its job.
+_SERVICE_SETTLED = {"stop": ("inactive", "failed"), "restart": ("active", "activating")}
+
+
+def control_service(handler: Any) -> None:
+    """POST /api/provision/service — stop or restart the installed
+    anolis-runtime service, here (no `target`) or over SSH (wb#581).
+
+    A `sudo_password` is for this machine only, accepted from a loopback
+    client, and zeroed after the one command that uses it.
+    """
+    content_length = int(handler.headers.get("Content-Length", 0))
+    body = handler.rfile.read(content_length) if content_length else b"{}"
+    params = json.loads(body)
+    action = params.get("action")
+    if action not in _SERVICE_SETTLED:
+        handler._json(400, {"error": "'action' must be stop or restart"})
+        return
+    target = params.get("target")
+    if target is not None and (not isinstance(target, str) or "@" not in target):
+        handler._json(400, {"error": "'target' must be user@host"})
+        return
+    secret = params.get("sudo_password")
+    if secret is not None and not isinstance(secret, str):
+        handler._json(400, {"error": "'sudo_password' must be a string"})
+        return
+    if secret and target is not None:
+        handler._json(400, {"error": "A sudo password is used only on this machine, not over SSH"})
+        return
+    if secret and not ipaddress.ip_address(handler.client_address[0]).is_loopback:
+        handler._json(403, {"error": "A sudo password is accepted only from this machine (loopback)"})
+        return
+    password = bytearray(secret.encode()) if secret else None
+    del secret
+
+    machine = target if target is not None else "this machine"
+    ssh = None
+    try:
+        if target is None:
+            executor: Any = LocalExecutor(sudo_password=password)
+        else:
+            user, host = target.split("@", 1)
+            executor = ssh = ParamikoSSHExecutor(
+                host=host, user=user, key_file=params.get("key_file"), port=params.get("port", 22)
+            )
+        state = deploy.control_runtime_service(executor, action)
+    except deploy.DeployError as exc:
+        handler._json(502, {"error": f"{deploy.RUNTIME_SERVICE} on {machine}: {exc}"})
+        return
+    except Exception as exc:  # noqa: BLE001 — the SSH connection, reported to the panel
+        handler._json(502, {"error": f"Could not reach {machine}: {exc}"})
+        return
+    finally:
+        if ssh is not None:
+            ssh.close()
+        if password is not None:
+            zero_buffer(password)
+    if state not in _SERVICE_SETTLED[action]:
+        handler._json(
+            502,
+            {
+                "error": f"{deploy.RUNTIME_SERVICE} on {machine} is still {state} after systemctl {action}",
+                "state": state,
+            },
+        )
+        return
+    handler._json(200, {"ok": True, "action": action, "machine": machine, "state": state})
+
+
 def check_target(handler: Any) -> None:
     """POST /api/provision/check-target — the project's pins beside what the
     target has installed, and what a deploy would do about the runtime (#567).

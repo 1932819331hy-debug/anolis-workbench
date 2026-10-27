@@ -100,6 +100,17 @@ def stop_project(handler, name: str) -> None:
     except FileNotFoundError:
         handler._json(404, {"error": f"Project '{name}' not found"})
         return
+    if launcher_module.get_status()["external"]:
+        # stop() cannot reach a runtime it did not launch; it did nothing and
+        # this route answered ok (wb#581).
+        handler._json(
+            409,
+            {
+                "error": "The running runtime is an installed service, which the workbench did not launch. "
+                "Stop it under Deploy to device, or with: sudo systemctl stop anolis-runtime"
+            },
+        )
+        return
     launcher_module.stop()
     handler._json(200, {"ok": True})
 

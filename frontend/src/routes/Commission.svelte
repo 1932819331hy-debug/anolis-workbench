@@ -243,6 +243,14 @@
   let deployTelemetryExport = $state<boolean>(false);
   let deployObservability = $state<boolean>(false);
   let deployRunning = $state<boolean>(false);
+  // Stop or restart the installed anolis-runtime service on the deploy target
+  // (wb#581): the first click arms, the confirm names the machine.
+  let serviceArmed = $state<"" | "stop" | "restart">("");
+  let serviceRunning = $state<boolean>(false);
+  let serviceResult = $state<{ text: string; cls: string } | null>(null);
+  const serviceMachine = $derived(deployTarget === "remote" ? deployHost.trim() : "this machine");
+  const serviceReady = $derived(deployTarget === "local" || deployHost.trim().includes("@"));
+  const runtimeIsService = $derived(Boolean(runtimeStatus?.external));
   let deployProgress = $state<string[]>([]);
   let deployOutcome = $state<DeployOutcome | null>(null);
   let deployError = $state<string>("");
@@ -431,6 +439,8 @@
         ? status.active_project
         : null;
     if (!r || !rp) return "";
+    if (status.external)
+      return `Launch blocked: an installed runtime service is active for "${rp}". Stop it under Deploy to device before launching "${target}".`;
     if (rp === target)
       return `Launch blocked: runtime is already active for "${target}". Use Stop or Restart.`;
     return `Launch blocked: runtime is active for "${rp}". Stop that runtime before launching "${target}".`;
@@ -686,6 +696,36 @@
   }
 
   // ── Bundle Export ─────────────────────────────────────────────────────────
+  // ── Installed runtime service (wb#581) ─────────────────────────────────────
+  async function doService(action: "stop" | "restart") {
+    if (serviceArmed !== action) {
+      serviceArmed = action;
+      serviceResult = null;
+      return;
+    }
+    serviceArmed = "";
+    serviceRunning = true;
+    const body: Record<string, unknown> = { action };
+    if (deployTarget === "remote") body.target = deployHost.trim();
+    else if (deploySudoPassword) body.sudo_password = deploySudoPassword;
+    deploySudoPassword = "";
+    try {
+      const res = await fetchJson<{ machine: string; state: string }>("/api/provision/service", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      serviceResult = { text: `anolis-runtime on ${res.machine}: ${res.state}`, cls: "field-note" };
+    } catch (err) {
+      serviceResult = {
+        text: err instanceof Error ? err.message : String(err),
+        cls: "field-error",
+      };
+    } finally {
+      serviceRunning = false;
+    }
+  }
+
   async function doExportBundle() {
     if (!projectName) return;
     bundleRunning = true;
@@ -945,18 +985,31 @@
               ? "Unavailable"
               : "Starting…"}
         </span>
-        <button class="btn-secondary btn-sm" type="button" disabled={stopRunning} onclick={doStop}>
-          {stopRunning ? "Stopping…" : "Stop"}
-        </button>
-        <button
-          class="btn-secondary btn-sm"
-          type="button"
-          disabled={restartRunning}
-          title="Restarts with last saved config. Unsaved edits will not be applied."
-          onclick={doRestart}
-        >
-          {restartRunning ? "Restarting…" : "Restart"}
-        </button>
+        {#if runtimeIsService}
+          <!-- Not one the workbench launched, so its Stop cannot reach it (wb#581). -->
+          <span class="field-note" data-testid="external-runtime-note">
+            This runtime is installed as a service on this machine: stop or restart it under Deploy
+            to device, with "This machine" as the target.
+          </span>
+        {:else}
+          <button
+            class="btn-secondary btn-sm"
+            type="button"
+            disabled={stopRunning}
+            onclick={doStop}
+          >
+            {stopRunning ? "Stopping…" : "Stop"}
+          </button>
+          <button
+            class="btn-secondary btn-sm"
+            type="button"
+            disabled={restartRunning}
+            title="Restarts with last saved config. Unsaved edits will not be applied."
+            onclick={doRestart}
+          >
+            {restartRunning ? "Restarting…" : "Restart"}
+          </button>
+        {/if}
       </div>
     {/if}
 
@@ -1157,6 +1210,44 @@
     {#if targetCheckError}
       <p class="field-error">{targetCheckError}</p>
     {/if}
+    <!-- The anolis-runtime service install.sh installed on the target (wb#581). -->
+    <div class="deploy-service">
+      <span class="field-note">Installed runtime:</span>
+      {#if serviceArmed}
+        {@const armed = serviceArmed}
+        <button
+          type="button"
+          class="btn-secondary btn-sm"
+          disabled={serviceRunning}
+          onclick={() => doService(armed)}
+        >
+          Confirm: {armed} anolis-runtime on {serviceMachine}
+        </button>
+        <button type="button" class="btn-secondary btn-sm" onclick={() => (serviceArmed = "")}>
+          Cancel
+        </button>
+      {:else}
+        <button
+          type="button"
+          class="btn-secondary btn-sm"
+          disabled={deployRunning || serviceRunning || !serviceReady}
+          onclick={() => doService("stop")}
+        >
+          Stop the installed runtime…
+        </button>
+        <button
+          type="button"
+          class="btn-secondary btn-sm"
+          disabled={deployRunning || serviceRunning || !serviceReady}
+          onclick={() => doService("restart")}
+        >
+          Restart the installed runtime…
+        </button>
+      {/if}
+      {#if serviceResult}
+        <p class={serviceResult.cls} data-testid="service-result">{serviceResult.text}</p>
+      {/if}
+    </div>
     {#if targetCheck}
       {@const check = targetCheck.result}
       <table class="target-versions" id="target-versions">

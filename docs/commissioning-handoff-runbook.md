@@ -90,6 +90,15 @@ its binary. The providers' versions come from the target's
 when that file is missing, unreadable or was written for another runtime
 version.
 
+The installed runtime is the `anolis-runtime` systemd service, which the
+workbench did not launch, so Commission's own Stop and Restart cannot reach
+it. Under **Deploy to device**, **Stop the installed runtime…** and
+**Restart the installed runtime…** run `systemctl stop` or `restart` on the
+deploy target, over SSH or here with the sudo password above. Each asks for a
+confirm naming the machine, then shows what `systemctl is-active` reports.
+Without the workbench, run `sudo systemctl stop anolis-runtime` on the
+target.
+
 ## 4) Export Package (Provenance Record)
 
 Workbench path:

@@ -58,6 +58,9 @@ def get_status() -> dict:
         "active_project": runtime["project"],
         "running": runtime["running"],
         "pid": runtime["pid"],
+        # A runtime the workbench did not launch, such as the systemd service
+        # install.sh installs: its own Stop and Restart cannot reach it (wb#581).
+        "external": bool(runtime.get("external")),
     }
 
 
