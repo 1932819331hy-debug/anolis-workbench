@@ -15,7 +15,13 @@ Prerequisites:
 
 1. Rust toolchain
 2. Node 20+
-3. Python sidecar available (local Python environment for `anolis-workbench`)
+3. Frozen sidecar executable at
+   `desktop/src-tauri/binaries/anolis-workbench-sidecar-<host-triple>[.exe]`:
+   with the `dev` extra installed, build the frontend first
+   (`cd frontend && npm ci && npm run build`), then from the repository root run
+   `python scripts/freeze_server.py --name anolis-workbench --output-dir dist`
+   and copy `dist/anolis-workbench[.exe]` to that path. A local Python
+   environment alone is not enough; the wrapper launches only this executable.
 
 Run:
 
@@ -35,13 +41,14 @@ Then runs:
 
 ```bash
 cd desktop
-npm run tauri:build -- --target <rust-target-triple>
+npx tauri build --target <rust-target-triple>
 ```
 
 Installer targets:
 
 1. Windows `.msi`
 2. Linux `.AppImage` and `.deb`
+3. macOS `.dmg` (Apple Silicon and Intel)
 
 Versioning note:
 
@@ -51,5 +58,7 @@ Versioning note:
 
 Port note:
 
-- `3010` is reserved by the desktop wrapper; if already occupied, startup fails
-  with a native error dialog.
+- `3010` is hardcoded in the desktop wrapper. If another Anolis Workbench
+  instance already holds it, the window attaches to that instance. If an
+  unrelated process holds it, startup times out after 20 seconds and the
+  wrapper requests a native error dialog and exits.

@@ -37,12 +37,20 @@ Facility path (air-gapped baseline): stage a bundle, carry it to the target
 anolis-provision bundle --project <project-name> --arch arm64 --out <dir>
 ```
 
-Commission's bundle export builds the same bundle. On the target, as
-`anolis-provision bundle` prints:
+Commission's bundle export builds the same bundle. `anolis-provision bundle`
+also writes `<bundle>.tar.gz.sha256` beside it; Commission's Export Bundle
+download is the tarball alone, so skip the `sha256sum` step on that path. On
+the target, verify and unpack the bundle, then run the `install.sh` it carries:
 
 ```bash
-sudo ./install.sh --local <bundle>.tar.gz
+sha256sum -c <bundle>.tar.gz.sha256   # anolis-provision bundle only
+tar xzf <bundle>.tar.gz
+sudo <bundle>/install.sh --local <bundle>.tar.gz
 ```
+
+`anolis-provision bundle` prints `sudo ./install.sh --local <bundle>.tar.gz`,
+which assumes an `install.sh` beside the tarball; the bundle step leaves none
+there.
 
 Online convenience path: when the target can reach the GitHub release
 downloads, deploy straight from the workbench, with Commission's Deploy to
@@ -87,7 +95,7 @@ version.
 Workbench path:
 
 1. Open project in `Commission`.
-2. Click `Export Package…`.
+2. Click `Export .anpkg`.
 3. Save generated `.anpkg` artifact.
 
 CLI path:
@@ -114,7 +122,7 @@ python3 contracts/validate-handoff-packages.py \
 
 Manual replay, as a validation step only: extract the package into a
 scratch directory and start a runtime against it. This checks that the
-package is self-contained. It does not deploy: nothing is installed, no
+package's configs are self-contained. It does not deploy: nothing is installed, no
 service is created, and the target's `/opt/anolis` is not touched.
 
 ```bash
@@ -124,8 +132,14 @@ export INFLUXDB_TOKEN='<token-value>'   # only if telemetry is enabled
 <path-to-anolis-runtime> --config runtime/anolis-runtime.yaml
 ```
 
-Expected: runtime loads config and providers without dependency on
-`systems/<project>/`.
+Expected: the runtime loads its config from inside the package, with no
+dependency on `systems/<project>/`. The exported `manual` variant has
+automation disabled, so the runtime loads no behavior tree. Each provider
+process reads `providers/<id>.yaml` through its `--config` argument once it
+starts. Provider binaries are not in the package: each
+provider's `command` is carried as authored and a relative one resolves
+against `<scratch-dir>`, so providers start only if their binaries exist at
+those paths.
 
 ## 6) Operator Handoff Package Contents
 
@@ -141,7 +155,12 @@ Deliver all of:
 ## 7) Rollback Guidance
 
 1. Keep the prior known-good bundle and its `.anpkg` in deployment
-   storage. The `.anpkg` records the configs that rollout shipped.
+   storage. The `.anpkg` records the project's `manual` runtime variant
+   (other variants are listed as omitted in `meta/provenance.json`), its
+   provider configs and the behavior tree it references, if any, with
+   the runtime config's InfluxDB token stripped (an export carrying any
+   other token-like value in its YAML or JSON is refused). It is not a
+   record of every config the bundle shipped or of what the target kept.
 2. If a new rollout fails, restore the previous binaries on the target:
 
    ```bash

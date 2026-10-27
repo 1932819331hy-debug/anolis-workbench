@@ -26,7 +26,9 @@ No competing manifest dialect is introduced.
 
 Path rewrite contract at export:
 
-1. `runtime_profiles.*` -> package-relative runtime paths.
+1. `runtime_profiles` -> `{manual: runtime/anolis-runtime.yaml}`. Only the
+   `manual` variant is exported; other variants are omitted and listed in
+   `meta/provenance.json.omitted_variants`.
 2. `providers.<id>.config` -> `providers/<id>.yaml`.
 3. `behaviors[]` -> `runtime/behaviors/<file>.xml`.
 4. Runtime provider `--config` args -> `providers/<id>.yaml`.
@@ -57,16 +59,17 @@ every package file except `meta/checksums.sha256` itself.
 
 ## Validation Contract
 
-Use:
+Use, where `<package-path>` is an `.anpkg` archive or an extracted package
+directory:
 
 ```bash
-python3 contracts/validate-handoff-packages.py
+python3 contracts/validate-handoff-packages.py <package-path>
 ```
 
 Optional runtime replay hardening:
 
 ```bash
-python3 contracts/validate-handoff-packages.py --runtime-bin <runtime-binary>
+python3 contracts/validate-handoff-packages.py <package-path> --runtime-bin <runtime-binary>
 ```
 
 Validation includes:

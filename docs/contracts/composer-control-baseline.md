@@ -32,7 +32,7 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
 
 1. Control endpoints return stable JSON success payloads.
 2. Error payloads expose stable top-level `error` text.
-3. Validation-failure payloads include structured `errors[]` entries.
+3. Project save and import validation failures include structured `errors[]` entries (`source`, `code`, `path`, `message`); launch and restart validation failures return `422` with an `errors[]` list of strings.
 4. Expected status semantics:
    - `400` invalid project names
    - `404` unknown project
@@ -41,15 +41,22 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
 
 ### Runtime/Path Decoupling
 
-1. Composer path resolution is repo-anchored (`anolis_workbench/core/paths.py`), not caller-CWD dependent.
+1. Composer path resolution is package-anchored (`anolis_workbench/core/paths.py`), not caller-CWD dependent. Project data defaults to `~/.anolis/systems`, or `ANOLIS_DATA_DIR` if set; a relative override resolves against the CWD.
 
-2. Control-plane environment knobs remain:
+2. `ANOLIS_*` environment variables the Workbench server reads:
 
    - `ANOLIS_WORKBENCH_HOST`
    - `ANOLIS_WORKBENCH_PORT`
    - `ANOLIS_TELEMETRY_URL`
    - `ANOLIS_WORKBENCH_OPEN_BROWSER`
    - `ANOLIS_WORKBENCH_ALLOWED_HOSTS`
+   - `ANOLIS_WORKBENCH_RUNTIME_URL`
+   - `ANOLIS_WORKBENCH_RUNTIME_TOKEN`
+   - `ANOLIS_DATA_DIR`
+   - `ANOLIS_FRONTEND_DIR`
+   - `ANOLIS_IMPORT_ROOTS`
+   - `ANOLIS_RUNTIME_PATH`
+   - `ANOLIS_WB_RELEASE_PINS`
 
 ## Validation Gates
 
@@ -60,4 +67,4 @@ Freeze Workbench control API behavior used by commissioning flows so UI and tool
 
 1. Additive response fields are allowed.
 2. Existing fields must keep semantics.
-3. Status-code or payload-shape changes require synchronized updates to implementation, OpenAPI, tests, and this baseline.
+3. Status-code or payload-shape changes require synchronized updates to implementation, OpenAPI, tests, and this baseline. No check enforces this: the OpenAPI validator checks document structure and that the seven operations exist, not their status codes against the implementation. `contracts/composer-control.openapi.v1.yaml` does not list the `422` launch and restart validation failure or the `409` imported-project refusal on preflight and stop, and its `ErrorResponse.errors` schema requires object items with `source`, `code`, `path` and `message`, which matches the save and import validation failures but not the `422` response, which returns strings.

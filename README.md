@@ -6,7 +6,7 @@ Repository structure:
 
 1. `anolis_workbench/core` — pure domain library (projects, canonical artifacts, launcher, exporter, validators, paths)
 2. `anolis_workbench/server` — unified HTTP server (Compose + Commission + Operate `/v0/*` proxy)
-3. `anolis_workbench/cli` — CLI entry points (`anolis-workbench`, `anolis-package`, `anolis-validate`)
+3. `anolis_workbench/cli` — CLI entry points (`anolis-workbench`, `anolis-package`, `anolis-validate`, `anolis-provision`)
 
 Developer references:
 
@@ -74,8 +74,17 @@ the install copies that token alone into
 user, so Operate can reach a runtime that requires the token on loopback.
 The workbench sends it only to a runtime on this machine. It keeps the
 token out of the environment of the processes it starts, but a program it
-launches runs as the same user and can still read the file. Uninstalling the
-service removes the copy.
+launches runs as the same user and can still read the file. The workbench
+has no command that uninstalls the service. The runtime's
+`install.sh --uninstall` removes the service along with the token copy (the
+token copy only from anolis v0.1.48 on). To remove the workbench service and
+the copy by hand and keep the runtime:
+
+```sh
+sudo systemctl disable --now anolis-workbench.service
+sudo rm -f /etc/systemd/system/anolis-workbench.service /etc/anolis/workbench-runtime-token
+sudo systemctl daemon-reload
+```
 
 Anyone who can reach the workbench while the service runs, as a local
 account on the host or over an ssh tunnel to it, can run programs as the
@@ -174,7 +183,7 @@ Switching from the old Docker stack: earlier workbench releases ran it from
 install, stop it before provisioning:
 
 ```sh
-cd ~/.anolis/observability && docker compose down
+cd ~/.anolis/observability && docker compose -f docker-compose.observability.yml down
 ```
 
 A leftover InfluxDB container on `0.0.0.0:8086` keeps the native `influxd`
@@ -194,7 +203,9 @@ npm run test:unit:coverage
 npm run test:components:coverage
 ```
 
-The Vitest lanes enforce coverage thresholds for `frontend/src/lib/*`.
+The unit lane (`vitest.config.ts`) enforces coverage thresholds for
+`frontend/src/lib/**/*.{js,ts}`. The components lane reports coverage for
+`frontend/src/**/*.svelte` with no thresholds.
 
 ## Desktop Wrapper
 
@@ -208,8 +219,10 @@ Runtime model:
 
 Important system requirement:
 
-- Port `3010` is reserved by the desktop wrapper. If another process is bound to
-  that port, desktop startup fails with a native error dialog.
+- Port `3010` is reserved by the desktop wrapper. If a process other than
+  Anolis Workbench is bound to that port, desktop startup fails (and tries to
+  show a native error dialog). If another Anolis Workbench server already
+  holds it, the desktop window attaches to that server instead.
 
 Desktop workflows/docs:
 

@@ -44,8 +44,8 @@ validation remain explicit and test-backed.
 
 ## Validation Gates
 
-1. `python3 contracts/validate-handoff-packages.py`
-2. `python3 contracts/validate-handoff-packages.py --runtime-bin <runtime-binary>` (optional replay hardening)
+1. `python3 contracts/validate-handoff-packages.py <package.anpkg>`
+2. `python3 contracts/validate-handoff-packages.py <package.anpkg> --runtime-bin <runtime-binary>` (optional replay hardening)
 3. `python3 -m pytest tests -q`
 
 ## Drift Notes and Change Rule
