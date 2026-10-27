@@ -65,6 +65,15 @@ Upgrade notes:
 
 ### Fixed
 
+- **The x86_64 macOS desktop bundle carries an x86_64 sidecar** (#677). Its
+  sidecar was frozen on `macos-14`, an arm64 runner, with that runner's
+  Python, so the bundle labelled x86_64 shipped an arm64 sidecar, which an
+  Intel Mac cannot run. That is verified for 0.22.0 (`EXE target arch:
+  arm64` in its release log). It is likely for every release since v0.11.2,
+  when the release workflow moved that build from `macos-13` to `macos-14`,
+  but those were not checked one by one. Both x86_64 macOS jobs now run on
+  `macos-15-intel`, and the release checks each macOS sidecar's architecture
+  before packaging it. 0.23.0 is the first release built this way.
 - **`install --system` updates a provisioned project without `--force`**
   (#650, #660): an unchanged copy is up to date, and a pin bump updates it
   and names `machine-profile.yaml`. A local edit still refuses, names the

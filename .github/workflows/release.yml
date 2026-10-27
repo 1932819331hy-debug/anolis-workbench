@@ -258,9 +258,14 @@ jobs:
           - os: macos-15
             target: aarch64-apple-darwin
             ext: ""
-          - os: macos-14
+            arch: arm64
+          # macos-15 is arm64; macos-15-intel is the x64 image. PyInstaller
+          # freezes for the Python it runs on, so the x86_64 sidecar needs an
+          # x64 runner (#677).
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             ext: ""
+            arch: x86_64
 
     steps:
       - name: Checkout repository
@@ -302,6 +307,18 @@ jobs:
             --output-dir dist \
             --min-size-bytes 10000000
 
+      - name: Check the sidecar's architecture
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archs=$(lipo -archs "dist/anolis-workbench${{ matrix.ext }}")
+          echo "dist/anolis-workbench${{ matrix.ext }}: ${archs}"
+          if [[ "${archs}" != "${{ matrix.arch }}" ]]; then
+            echo "::error::sidecar for ${{ matrix.target }} is ${archs}, expected ${{ matrix.arch }}"
+            exit 1
+          fi
+
       - name: Stage sidecar artifact for Tauri target
         shell: bash
         run: |
@@ -334,7 +351,7 @@ jobs:
             target: x86_64-pc-windows-msvc
           - os: macos-15
             target: aarch64-apple-darwin
-          - os: macos-14
+          - os: macos-15-intel
             target: x86_64-apple-darwin
 
     steps:
