@@ -7,8 +7,12 @@ systemd) is delegated to the canonical anolis install.sh — see core/deploy.py.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import shutil
+import tempfile
 from pathlib import Path
+from typing import Callable
 
 from anolis_workbench.core import canonical, machine_profile
 from anolis_workbench.core import paths as paths_module
@@ -20,6 +24,13 @@ from anolis_workbench.core.executor import Executor
 # ---------------------------------------------------------------------------
 
 _RUNTIME_BINARY_NAME = "anolis-runtime"
+
+# What the last provisioning wrote into a workspace project, so a re-provision
+# can tell the operator's edits from changes in the source (#650). A dotfile:
+# no machine profile copies it, so it is never deployed.
+PROVISIONED_RECORD = ".provisioned.json"
+# Sidecar fields every provisioning rewrites; never a local edit.
+_REGENERATED_SIDECAR_KEYS = ("meta", "host_paths")
 
 # ---------------------------------------------------------------------------
 # Exceptions
@@ -44,6 +55,7 @@ def provision_project(
     executor: Executor | None = None,
     systems_root: Path | None = None,
     system_path: Path | None = None,
+    report: Callable[[str], None] | None = None,
 ) -> Path:
     """Create a workbench project from a bundled canonical template.
 
@@ -61,7 +73,9 @@ def provision_project(
         executor: Unused for local writes; kept for signature compatibility.
         systems_root: Override systems root. Defaults to local SYSTEMS_ROOT.
         system_path: Optional path to an existing canonical project directory to
-            copy instead of a bundled template.
+            copy instead of a bundled template. An existing project is then
+            updated from it without `force`, unless it has local edits (#650).
+        report: Receives a line saying what a re-provision changed.
 
     Returns:
         Path to the created project directory.
@@ -72,7 +86,9 @@ def provision_project(
     project_dir = systems_root / project_name
     if project_dir.exists():
         if not force:
-            raise ValueError(f"Project '{project_name}' already exists at {project_dir}. Use --force to overwrite.")
+            if system_path is None:
+                raise ValueError(f"Project '{project_name}' already exists at {project_dir}. Use --force to overwrite.")
+            return _reprovision(template_name, project_name, install_prefix, system_path, systems_root, report)
         paths_module.rmtree_within(project_dir, systems_root)
 
     source = system_path if system_path is not None else paths_module.TEMPLATES_ROOT / template_name
@@ -115,7 +131,96 @@ def provision_project(
     finally:
         projects_module.SYSTEMS_ROOT = previous_root
 
+    _write_record(project_dir)
     return project_dir
+
+
+def _reprovision(
+    template_name: str,
+    project_name: str,
+    install_prefix: Path,
+    system_path: Path,
+    systems_root: Path,
+    report: Callable[[str], None] | None,
+) -> Path:
+    """Update an existing workspace project from `system_path`, unless it has
+    edits of the operator's since it was last provisioned (#650)."""
+    project_dir = systems_root / project_name
+    record = _read_record(project_dir)
+    current = _fingerprints(project_dir)
+    if record is not None:
+        edited = _differing(record, current)
+        if edited:
+            raise ValueError(
+                f"Project '{project_name}' at {project_dir} has local edits since it was last provisioned: "
+                f"{', '.join(edited)}. Re-provisioning from {system_path} would overwrite them; "
+                "use --force to replace them."
+            )
+    # Staged beside the project, on the same filesystem, so it moves into place.
+    with tempfile.TemporaryDirectory(prefix=".reprovision-", dir=systems_root) as staging:
+        staged = provision_project(
+            template_name, project_name, install_prefix, system_path=system_path, systems_root=Path(staging)
+        )
+        changed = _differing(current, _fingerprints(staged))
+        if record is None and changed:
+            raise ValueError(
+                f"Project '{project_name}' at {project_dir} has no record of what was last provisioned into it "
+                f"(an earlier workbench provisioned it), so its local edits can't be told apart from changes in "
+                f"{system_path}. These files differ from it: {', '.join(changed)}. Check them, then re-provision "
+                "once with --force; later re-provisions update it without --force."
+            )
+        paths_module.rmtree_within(project_dir, systems_root)
+        shutil.move(str(staged), str(project_dir))
+    if report is not None:
+        if changed:
+            report(f"Updated workspace project {project_name} from {system_path}: {', '.join(changed)}")
+        else:
+            report(f"Workspace project {project_name} is up to date with {system_path}")
+    return project_dir
+
+
+def _fingerprints(project_dir: Path) -> dict[str, str]:
+    """sha256 per file of a workspace project, by relative path. The sidecar
+    is hashed without the fields every provisioning rewrites."""
+    out: dict[str, str] = {}
+    for path in sorted(project_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(project_dir).as_posix()
+        if rel == PROVISIONED_RECORD:
+            continue
+        data = path.read_bytes()
+        if rel == machine_profile.SIDECAR_NAME:
+            try:
+                sidecar = json.loads(data)
+            except ValueError:
+                pass
+            else:
+                if isinstance(sidecar, dict):
+                    kept = {k: v for k, v in sidecar.items() if k not in _REGENERATED_SIDECAR_KEYS}
+                    data = json.dumps(kept, sort_keys=True).encode("utf-8")
+        out[rel] = hashlib.sha256(data).hexdigest()
+    return out
+
+
+def _differing(before: dict[str, str], after: dict[str, str]) -> list[str]:
+    return sorted(path for path in before.keys() | after.keys() if before.get(path) != after.get(path))
+
+
+def _write_record(project_dir: Path) -> None:
+    record = {"files": _fingerprints(project_dir)}
+    (project_dir / PROVISIONED_RECORD).write_text(json.dumps(record, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _read_record(project_dir: Path) -> dict[str, str] | None:
+    try:
+        record = json.loads((project_dir / PROVISIONED_RECORD).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    files = record.get("files") if isinstance(record, dict) else None
+    if not isinstance(files, dict) or not all(isinstance(v, str) for v in files.values()):
+        return None
+    return {str(k): v for k, v in files.items()}
 
 
 def _copy_canonical(source: Path, dest: Path) -> None:

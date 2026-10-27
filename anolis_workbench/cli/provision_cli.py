@@ -66,7 +66,8 @@ def _parse_args() -> argparse.Namespace:
     install_parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite an existing workspace project.",
+        help="Overwrite an existing workspace project, local edits included. Without it, --system updates "
+        "a project that has no local edits.",
     )
     install_parser.add_argument(
         "--variant",
@@ -200,7 +201,8 @@ def _parse_args() -> argparse.Namespace:
     remote_parser.add_argument(
         "--force",
         action="store_true",
-        help="Overwrite an existing local workspace project.",
+        help="Overwrite an existing local workspace project, local edits included. Without it, --system "
+        "updates a project that has no local edits.",
     )
     remote_parser.add_argument(
         "--allow-unmet-host",
@@ -401,6 +403,7 @@ def _provision_workspace(args: argparse.Namespace) -> Path:
         args.install_prefix,
         force=force,
         system_path=system_path,
+        report=lambda line: _print_progress("project", line),
     )
 
 

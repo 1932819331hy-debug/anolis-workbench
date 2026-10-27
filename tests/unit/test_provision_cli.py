@@ -451,6 +451,29 @@ def test_missing_template_error_points_at_import(tmp_path, monkeypatch) -> None:
         installer.provision_project("bioreactor-manual", "p", tmp_path / "prefix", systems_root=systems_root)
 
 
+def test_install_from_system_twice_needs_no_force_and_says_so(tmp_path, monkeypatch, capsys) -> None:
+    """#650: the second `install --system` for a provisioned project updates it
+    in place and says so, rather than stopping for --force."""
+    import shutil
+
+    from anolis_workbench.cli import provision_cli
+
+    systems_root = tmp_path / "systems"
+    systems_root.mkdir()
+    monkeypatch.setattr("anolis_workbench.core.paths.SYSTEMS_ROOT", systems_root)
+    monkeypatch.setattr("anolis_workbench.core.projects.SYSTEMS_ROOT", systems_root)
+    source = tmp_path / "clone"
+    shutil.copytree(pathlib.Path(__file__).parent.parent / "fixtures" / "mixed-bus-mock", source)
+    argv = ["anolis-provision", "install", "--system", str(source), "--project", "rig"]
+
+    monkeypatch.setattr(sys, "argv", argv)
+    first = provision_cli._provision_workspace(provision_cli._parse_args())
+    monkeypatch.setattr(sys, "argv", argv)
+    assert provision_cli._provision_workspace(provision_cli._parse_args()) == first
+
+    assert f"Workspace project rig is up to date with {source}" in capsys.readouterr().out
+
+
 _UNVERIFIED = "WARNING: install.sh not verified: anolis v0.1.48 predates install.sh in SHA256SUMS"
 
 

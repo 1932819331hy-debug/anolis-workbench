@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -125,3 +126,133 @@ def test_provision_from_an_existing_canonical_project_carries_every_provider(
     # without that it would install into the SOURCE's directory.
     assert document["profile"]["machine_id"] == "mixed-rig"
     assert document["meta"]["profile_dir_name"] == "mixed-rig"
+
+
+# ---------------------------------------------------------------------------
+# Re-provisioning from --system without --force (#650)
+# ---------------------------------------------------------------------------
+# Applying a newer project commit (a pin bump, say) to a provisioned machine
+# re-runs `install --system`. It updates the workspace copy when that copy has
+# no local edits, and says what changed; a local edit, or a copy with no record
+# of what was provisioned, needs --force.
+
+
+class TestReprovisionFromSystem:
+    @pytest.fixture
+    def rig(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
+        systems_root = tmp_path / "systems"
+        systems_root.mkdir()
+        monkeypatch.setattr("anolis_workbench.core.paths.SYSTEMS_ROOT", systems_root)
+        monkeypatch.setattr("anolis_workbench.core.projects.SYSTEMS_ROOT", systems_root)
+        source = tmp_path / "clone"
+        shutil.copytree(Path(__file__).parent.parent / "fixtures" / "mixed-bus-mock", source)
+        return {"systems_root": systems_root, "source": source, "prefix": tmp_path / "prefix"}
+
+    def provision(self, rig: dict, *, force: bool = False, report: list[str] | None = None) -> Path:
+        return installer.provision_project(
+            "unused-when-system-path-given",
+            "mixed-rig",
+            rig["prefix"],
+            force=force,
+            system_path=rig["source"],
+            systems_root=rig["systems_root"],
+            report=None if report is None else report.append,
+        )
+
+    @staticmethod
+    def bump_pin(source: Path) -> None:
+        profile = source / machine_profile.PROFILE_FILENAME
+        text = profile.read_text(encoding="utf-8")
+        assert text.count("version: 0.1.39") == 1
+        profile.write_text(text.replace("version: 0.1.39", "version: 0.1.55"), encoding="utf-8")
+
+    def test_an_unchanged_copy_reprovisions_and_says_so(self, rig: dict) -> None:
+        project_dir = self.provision(rig)
+        before = {p: p.read_bytes() for p in project_dir.rglob("*") if p.is_file()}
+        report: list[str] = []
+
+        assert self.provision(rig, report=report) == project_dir
+
+        assert {p: p.read_bytes() for p in project_dir.rglob("*") if p.is_file()} == before
+        assert report == [f"Workspace project mixed-rig is up to date with {rig['source']}"]
+
+    def test_a_pin_bump_updates_the_copy_and_names_the_file(self, rig: dict) -> None:
+        project_dir = self.provision(rig)
+        self.bump_pin(rig["source"])
+        report: list[str] = []
+
+        self.provision(rig, report=report)
+
+        assert "version: 0.1.55" in (project_dir / machine_profile.PROFILE_FILENAME).read_text(encoding="utf-8")
+        assert report == [f"Updated workspace project mixed-rig from {rig['source']}: machine-profile.yaml"]
+
+    def test_regenerated_sidecar_fields_are_not_local_edits(self, rig: dict) -> None:
+        # meta and host_paths are rewritten on every provisioning (and by the
+        # workbench, e.g. meta.created_by), so they never count as an edit.
+        project_dir = self.provision(rig)
+        sidecar = machine_profile.read_sidecar(project_dir) or {}
+        sidecar["meta"] = {**sidecar.get("meta", {}), "created_by": "provision"}
+        canonical.write_sidecar(project_dir, sidecar)
+        self.bump_pin(rig["source"])
+        rig["prefix"] = rig["prefix"].parent / "other-prefix"
+
+        self.provision(rig)
+
+        host = canonical.host_paths(machine_profile.read_sidecar(project_dir))
+        assert host["runtime_executable"] == str(rig["prefix"] / "bin" / "anolis-runtime")
+
+    def test_a_local_edit_refuses_names_the_file_and_keeps_it(self, rig: dict) -> None:
+        project_dir = self.provision(rig)
+        edited = project_dir / "config" / "provider-bread.bread0.yaml"
+        edited.write_text(edited.read_text(encoding="utf-8") + "# tuned on the rig\n", encoding="utf-8")
+        self.bump_pin(rig["source"])
+
+        with pytest.raises(ValueError) as refused:
+            self.provision(rig)
+
+        message = str(refused.value)
+        assert "config/provider-bread.bread0.yaml" in message
+        assert "machine-profile.yaml" not in message
+        assert "--force" in message
+        assert edited.read_text(encoding="utf-8").endswith("# tuned on the rig\n")
+        assert "version: 0.1.39" in (project_dir / machine_profile.PROFILE_FILENAME).read_text(encoding="utf-8")
+
+    def test_force_still_replaces_a_local_edit(self, rig: dict) -> None:
+        project_dir = self.provision(rig)
+        edited = project_dir / "config" / "provider-bread.bread0.yaml"
+        edited.write_text("edited\n", encoding="utf-8")
+
+        self.provision(rig, force=True)
+
+        assert edited.read_text(encoding="utf-8") != "edited\n"
+
+    def test_a_copy_with_no_record_refuses_and_lists_what_differs(self, rig: dict) -> None:
+        # Provisioned by an earlier workbench: nothing records what it wrote.
+        project_dir = self.provision(rig)
+        (project_dir / installer.PROVISIONED_RECORD).unlink()
+        self.bump_pin(rig["source"])
+
+        with pytest.raises(ValueError) as refused:
+            self.provision(rig)
+
+        message = str(refused.value)
+        assert "machine-profile.yaml" in message
+        assert "config/" not in message
+        assert "--force" in message
+        assert "version: 0.1.39" in (project_dir / machine_profile.PROFILE_FILENAME).read_text(encoding="utf-8")
+
+    def test_a_copy_with_no_record_that_matches_the_source_gets_one(self, rig: dict) -> None:
+        project_dir = self.provision(rig)
+        (project_dir / installer.PROVISIONED_RECORD).unlink()
+
+        self.provision(rig)
+        assert (project_dir / installer.PROVISIONED_RECORD).is_file()
+        self.bump_pin(rig["source"])
+        self.provision(rig)
+
+        assert "version: 0.1.55" in (project_dir / machine_profile.PROFILE_FILENAME).read_text(encoding="utf-8")
+
+    def test_the_record_is_not_deployed(self, rig: dict) -> None:
+        project_dir = self.provision(rig)
+        entries = set(machine_profile.copy_entries(machine_profile.load_profile(project_dir)))
+        assert installer.PROVISIONED_RECORD not in entries
