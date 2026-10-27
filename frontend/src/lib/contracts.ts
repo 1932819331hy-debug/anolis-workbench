@@ -457,6 +457,8 @@ export interface ProviderDeviceHealth extends UnknownRecord {
   health: string;
   last_poll_ms: number;
   staleness_ms: number;
+  /** What the provider reported for the device; metric values are strings. */
+  reported?: { state?: string; metrics?: Record<string, string> } | null;
 }
 
 export interface ProviderHealth extends UnknownRecord {

@@ -83,6 +83,23 @@ export function extractProvidersHealth(payload: unknown): ProviderHealth[] {
   return asArray(asObject(payload).providers) as ProviderHealth[];
 }
 
+/**
+ * Devices whose provider reports the SDK-reserved `watchdog_tripped` health
+ * metric as "true", as "provider/device" (wb#572). Only the exact value
+ * counts; an absent key makes no claim.
+ */
+export function watchdogTrippedDevices(providers: ProviderHealth[]): string[] {
+  const out: string[] = [];
+  for (const provider of providers) {
+    for (const device of provider.devices ?? []) {
+      if (device.reported?.metrics?.watchdog_tripped === "true") {
+        out.push(`${provider.provider_id}/${device.device_id}`);
+      }
+    }
+  }
+  return out;
+}
+
 export function extractCapabilities(payload: unknown): DeviceCapabilities {
   const root = asObject(payload);
   const caps = asObject(root.capabilities);

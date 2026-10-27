@@ -52,6 +52,7 @@
     summarizeRuntimeHealth,
     summarizeStartupSafeState,
     versionAtLeast,
+    watchdogTrippedDevices,
   } from "../lib/operate-contracts";
   import {
     appendEventTrace,
@@ -145,6 +146,16 @@
   let estopFeedbackFor = $state<string | null>(null);
 
   let providerHealth = $state<ProviderHealth[]>([]);
+  // Boards whose command watchdog tripped, and the one being cleared (wb#572).
+  // Each step of the clear is the operator's click; nothing runs on its own.
+  const trippedKeys = $derived(watchdogTrippedDevices(providerHealth));
+  let tripKey = $state<string>("");
+  let tripCleared = $state<boolean>(false);
+  let tripBrakes = $state<"" | "released" | "left">("");
+  // The release and the brakes take two clicks, as the stop card's clear does.
+  let tripArmed = $state<"" | "release" | "brakes">("");
+  let tripRunning = $state<boolean>(false);
+  let tripError = $state<{ step: number; text: string } | null>(null);
   let devices = $state<Device[]>([]);
   let selectedKey = $state<string>("");
   let deviceStates = $state<Record<string, DeviceStateValue[]>>({});
@@ -571,6 +582,112 @@
       clearRunning = false;
       clearArmed = false;
     }
+  }
+
+  // ── Guided watchdog-trip clear (wb#572) ─────────────────────────────────────
+  const tripCaps = $derived(tripKey ? capabilities[tripKey] : undefined);
+  const tripClearFn = $derived(
+    tripCaps?.functions.find((f) => f.name === "clear_watchdog_trip") ?? null,
+  );
+  // bread's DCMT: the trip engaged both brakes, released by set_brake(false, false).
+  const tripBrakeFn = $derived(
+    tripCaps?.functions.find(
+      (f) =>
+        f.name === "set_brake" && f.args?.length === 2 && f.args.every((a) => a.type === "bool"),
+    ) ?? null,
+  );
+  const tripReleased = $derived(estop !== null && !estop.latched);
+  const tripManual = $derived(modeFixedReason !== "" || mode === "MANUAL");
+
+  async function openTripClear(key: string): Promise<void> {
+    tripKey = key;
+    tripCleared = false;
+    tripBrakes = "";
+    tripArmed = "";
+    tripError = null;
+    if (capabilities[key]) return;
+    const [providerId, deviceId] = key.split("/");
+    let caps: DeviceCapabilities;
+    try {
+      caps = extractCapabilities(
+        await fetchJson<UnknownRecord>(
+          `/v0/devices/${encodeURIComponent(providerId)}/${encodeURIComponent(deviceId)}/capabilities`,
+        ),
+      );
+    } catch {
+      caps = { functions: [], signals: [] };
+    }
+    if (tripKey === key) capabilities = { ...capabilities, [key]: caps };
+  }
+
+  function closeTripClear(): void {
+    tripKey = "";
+    tripArmed = "";
+    tripError = null;
+  }
+
+  async function releaseForTrip(): Promise<void> {
+    if (tripArmed !== "release") {
+      tripArmed = "release";
+      return;
+    }
+    tripArmed = "";
+    // The stop card's own clear, armed: it checks the reply and reports in the row.
+    clearArmed = true;
+    await clearEstop();
+  }
+
+  async function manualForTrip(): Promise<void> {
+    modeSelectorValue = "MANUAL";
+    modeSelectorDirty = true;
+    await setMode();
+  }
+
+  /** POSTs one call for the board being cleared; false, with the error shown, if refused. */
+  async function callForTrip(stepNumber: number, func: FunctionSpec): Promise<boolean> {
+    const [providerId, deviceId] = tripKey.split("/");
+    tripError = null;
+    tripRunning = true;
+    try {
+      await fetchJson<UnknownRecord>("/v0/call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          provider_id: providerId,
+          device_id: deviceId,
+          function_id: func.function_id,
+          // No form: every bool argument goes as false.
+          args: buildArgsPayload(func, {}),
+        }),
+      });
+      return true;
+    } catch (err) {
+      tripError = {
+        step: stepNumber,
+        text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+      };
+      return false;
+    } finally {
+      tripRunning = false;
+    }
+  }
+
+  async function clearTrip(): Promise<void> {
+    if (!tripClearFn) return;
+    if (await callForTrip(3, tripClearFn)) {
+      tripCleared = true;
+      void refreshOperate();
+    }
+  }
+
+  async function releaseBrakes(): Promise<void> {
+    if (!tripBrakeFn) return;
+    if (tripArmed !== "brakes") {
+      tripArmed = "brakes";
+      return;
+    }
+    tripArmed = "";
+    if (await callForTrip(4, tripBrakeFn)) tripBrakes = "released";
   }
 
   // ── Function call ──────────────────────────────────────────────────────────
@@ -1192,6 +1309,170 @@
       </div>
     </div>
 
+    {#if trippedKeys.length || tripKey}
+      <!-- Boards whose command watchdog tripped refuse every SET until cleared
+           (wb#572). The clear is a sequence the operator confirms step by step. -->
+      <div class="operate-section" data-testid="watchdog-trips">
+        <h3>Watchdog trips</h3>
+        {#if trippedKeys.length}
+          <p class="field-note">
+            These boards' command watchdogs tripped, so they refuse every command until cleared.
+          </p>
+          <ul class="operate-list">
+            {#each trippedKeys as key (key)}
+              <li>
+                <span>{key}</span>
+                <button
+                  type="button"
+                  class="btn-secondary btn-sm"
+                  aria-label={`Clear the watchdog trip on ${key}…`}
+                  disabled={tripKey === key}
+                  onclick={() => openTripClear(key)}
+                >
+                  Clear trip…
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if tripKey}
+          <div data-testid="trip-clear">
+            <h4>Clearing the watchdog trip on {tripKey}</h4>
+            <ol>
+              <li data-testid="trip-step-1">
+                Release the software stop.
+                {#if tripReleased}
+                  <span class="field-note">Done: the software stop is released.</span>
+                {:else if tripArmed === "release"}
+                  <button
+                    type="button"
+                    class="btn-secondary btn-sm"
+                    disabled={clearRunning}
+                    onclick={releaseForTrip}
+                  >
+                    Confirm release — re-enables actuation
+                  </button>
+                  <button
+                    type="button"
+                    class="btn-secondary btn-sm"
+                    onclick={() => (tripArmed = "")}
+                  >
+                    Cancel
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    class="btn-secondary btn-sm"
+                    disabled={!estop || clearRunning}
+                    onclick={releaseForTrip}
+                  >
+                    Release the software stop…
+                  </button>
+                {/if}
+              </li>
+              <li data-testid="trip-step-2">
+                Put the runtime in MANUAL.
+                {#if modeFixedReason}
+                  <span class="field-note"
+                    >Skipped: the runtime has no mode to set ({modeFixedReason}).</span
+                  >
+                {:else if mode === "MANUAL"}
+                  <span class="field-note">Done: the runtime is in MANUAL.</span>
+                {:else}
+                  <button
+                    type="button"
+                    class="btn-secondary btn-sm"
+                    disabled={!tripReleased || setModeRunning}
+                    onclick={manualForTrip}
+                  >
+                    Set MANUAL
+                  </button>
+                  {#if modeFeedback && modeFeedbackClass === "field-error"}
+                    <span class="field-error">{modeFeedback}</span>
+                  {/if}
+                {/if}
+              </li>
+              <li data-testid="trip-step-3">
+                Clear the trip with <code>clear_watchdog_trip</code>.
+                {#if !tripCaps}
+                  <span class="field-note">Loading the board's functions…</span>
+                {:else if !tripClearFn}
+                  <span class="field-error">This board offers no clear_watchdog_trip function.</span
+                  >
+                {:else if tripCleared}
+                  <span class="field-note">Done: the trip is cleared.</span>
+                {:else}
+                  <button
+                    type="button"
+                    class="btn-secondary btn-sm"
+                    disabled={!tripReleased || !tripManual || tripRunning}
+                    onclick={clearTrip}
+                  >
+                    Clear the trip
+                  </button>
+                {/if}
+                {#if tripError?.step === 3}<span class="field-error">{tripError.text}</span>{/if}
+              </li>
+              {#if tripBrakeFn}
+                <li data-testid="trip-step-4">
+                  Release both brakes with <code>set_brake(false, false)</code>. The trip engaged
+                  them; released, the motors turn when commanded.
+                  {#if tripBrakes === "released"}
+                    <span class="field-note">Done: both brakes are released.</span>
+                  {:else if tripBrakes === "left"}
+                    <span class="field-note">Skipped: the brakes stay on.</span>
+                  {:else if tripArmed === "brakes"}
+                    <button
+                      type="button"
+                      class="btn-secondary btn-sm"
+                      disabled={tripRunning}
+                      onclick={releaseBrakes}
+                    >
+                      Confirm — releases both brakes
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-secondary btn-sm"
+                      onclick={() => (tripArmed = "")}
+                    >
+                      Cancel
+                    </button>
+                  {:else}
+                    <button
+                      type="button"
+                      class="btn-secondary btn-sm"
+                      disabled={!tripCleared || tripRunning}
+                      onclick={releaseBrakes}
+                    >
+                      Release both brakes…
+                    </button>
+                    <button
+                      type="button"
+                      class="btn-secondary btn-sm"
+                      disabled={!tripCleared || tripRunning}
+                      onclick={() => (tripBrakes = "left")}
+                    >
+                      Leave the brakes on
+                    </button>
+                  {/if}
+                  {#if tripError?.step === 4}<span class="field-error">{tripError.text}</span>{/if}
+                </li>
+              {/if}
+            </ol>
+            {#if tripCleared && (!tripBrakeFn || tripBrakes)}
+              <p class="field-note">
+                {tripKey}: the clear resumes nothing. Commands sent while it was tripped were
+                ignored, so command it again.
+              </p>
+            {/if}
+            <button type="button" class="btn-secondary btn-sm" onclick={closeTripClear}
+              >Close</button
+            >
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     <!-- Mode control -->
     <div class="operate-section operate-mode-section">
       <h3>Mode</h3>
@@ -1345,6 +1626,12 @@
                 {:else if stopChain?.state === "in_force" && stopChain.devices.includes(key)}
                   <!-- Powered off by the emergency stop: stopped, not faulted (wb#631). -->
                   <span class="badge unavailable" data-testid="device-stopped">STOPPED</span>
+                {/if}
+                {#if trippedKeys.includes(key)}
+                  <!-- Refuses every command until cleared (wb#572). -->
+                  <span class="badge fault" data-testid="device-watchdog-tripped"
+                    >WATCHDOG TRIPPED</span
+                  >
                 {/if}
                 {#if stopChain?.expectations[key]}
                   <span class="badge" data-testid="device-stop-expect">
