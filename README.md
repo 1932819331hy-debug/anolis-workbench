@@ -176,7 +176,9 @@ tunnel's end; `ANOLIS_TELEMETRY_URL` overrides it.
 `anolis-provision` does not forward that flag; run `install.sh` on the target
 yourself to use it. The admin password is `GRAFANA_ADMIN_PASSWORD` in
 `/etc/anolis/observability.env` on the target (root only); the workbench
-never reads it.
+never reads it. If `install.sh` made a new one for a Grafana it kept and could
+not set it there, its summary says the password is unknown, and so does the
+workbench's.
 
 Switching from the old Docker stack: earlier workbench releases ran it from
 `~/.anolis/observability` on the machine running the workbench. On a local

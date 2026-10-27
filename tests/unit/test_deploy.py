@@ -1573,3 +1573,29 @@ def test_a_failed_install_names_its_log(
     (log,) = list(_install_log_dir.iterdir())
     assert f"Full install.sh output: {log}" in str(raised.value)
     assert log.read_text(encoding="utf-8") == output
+
+
+# ---------------------------------------------------------------------------
+# A Grafana admin password install.sh could not reset (anolishq/anolis#514)
+# ---------------------------------------------------------------------------
+# pi-{loopback,network}-password-unknown.txt are anolis main's install.sh:
+# _obs_reset_grafana_admin_pw against a kept grafana.db with a grafana binary
+# that fails, then phase_summary, with /etc/anolis and /opt/anolis in place of
+# the temp tree it ran in.
+
+
+@pytest.mark.parametrize("bind", ["loopback", "network"])
+@pytest.mark.parametrize("ssh_target", [None, "pi@rig.local"], ids=["local", "remote"])
+def test_grafana_access_says_the_password_is_unknown_after_a_failed_reset(bind: str, ssh_target: str | None) -> None:
+    access = deploy.grafana_access(_install_sh_output(f"pi-{bind}-password-unknown"), ssh_target=ssh_target)
+    assert access, "Grafana is up, so how to reach it is still shown"
+    assert access[-1] == deploy.GRAFANA_ADMIN_LOGIN_UNKNOWN_NOTE
+    assert deploy.GRAFANA_ADMIN_LOGIN_NOTE not in access
+
+
+def test_observability_lines_carry_the_failed_reset_warning() -> None:
+    lines = deploy.observability_lines(_install_sh_output("pi-loopback-password-unknown"))
+    assert lines[0] == (
+        "⚠ observability: could not reset Grafana's admin password; GRAFANA_ADMIN_PASSWORD in "
+        "/etc/anolis/observability.env may not log in"
+    )
