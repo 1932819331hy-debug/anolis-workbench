@@ -37,6 +37,11 @@
   ],
   "packageRules": [
     {
+      "description": "Move @playwright/test and the Frontend job's Playwright image together: the image's browsers are the revisions that @playwright/test version expects. tests/unit/test_ci_playwright_image.py fails when they differ. See anolishq/anolis-workbench#544.",
+      "groupName": "playwright",
+      "matchPackageNames": ["@playwright/test", "mcr.microsoft.com/playwright"]
+    },
+    {
       "description": "Group Tauri ecosystem updates",
       "matchManagers": ["cargo"],
       "groupName": "tauri",
