@@ -108,7 +108,8 @@ describe("ProviderList.svelte", () => {
 
     const entry = doc.providers.sim0;
     expect(entry.kind).toBe("bread");
-    expect(entry.config.provider).toEqual({ name: "sim0" });
+    // outputs_on_startup has a schema default from bread 0.10.0 (bread#195).
+    expect(entry.config.provider).toEqual({ name: "sim0", outputs_on_startup: "safe" });
     expect(entry.config.hardware).toEqual({
       query_delay_us: 10000,
       timeout_ms: 100,

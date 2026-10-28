@@ -1,7 +1,7 @@
 {
   "config_schema_version": 1,
   "provider": "anolis-provider-bread",
-  "provider_version": "0.9.3",
+  "provider_version": "0.10.0",
   "schema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
@@ -17,6 +17,22 @@
             "description": "Stable identifier for this provider instance.",
             "pattern": "^[A-Za-z0-9_.-]{1,64}$",
             "default": "anolis-provider-bread"
+          },
+          "outputs_on_startup": {
+            "type": "string",
+            "title": "Outputs on startup",
+            "description": "What the provider does to device outputs when it starts, and when a device comes back after I/O failures. safe sets each DCMT to open loop at PWM 0 and each RLHT to setpoints 0, open loop and duty 0. leave keeps them as they are, for a process that must not be interrupted by a restart; set it together with the runtime's safety.on_startup: leave.",
+            "oneOf": [
+              {
+                "const": "safe",
+                "title": "Drive outputs safe"
+              },
+              {
+                "const": "leave",
+                "title": "Leave outputs as they are"
+              }
+            ],
+            "default": "safe"
           }
         },
         "additionalProperties": false

@@ -149,6 +149,30 @@ describe("SchemaForm.svelte (bread envelope)", () => {
     expect(encoders).not.toBeChecked();
   });
 
+  it("offers bread 0.10.0's outputs_on_startup without writing it until chosen (bread#195)", async () => {
+    // An existing config has no `outputs_on_startup` key, which bread reads as safe.
+    const config = breadConfig();
+    const onChanged = vi.fn();
+    render(SchemaForm, { props: { schema: breadSchema, value: config, onChanged } });
+
+    expect(screen.getByText("Outputs on startup")).toBeInTheDocument();
+    const select = screen
+      .getAllByRole("combobox")
+      .find((el) => el.querySelectorAll("option[value=leave]").length === 1) as HTMLSelectElement;
+    expect(select).toBeDefined();
+    expect(within(select).getByRole("option", { name: "Drive outputs safe" })).toBeInTheDocument();
+    expect(
+      within(select).getByRole("option", { name: "Leave outputs as they are" }),
+    ).toBeInTheDocument();
+    expect("outputs_on_startup" in (config.provider as UnknownRecord)).toBe(false);
+    expect(onChanged).not.toHaveBeenCalled();
+
+    await fireEvent.change(select, { target: { value: "leave" } });
+
+    expect(onChanged).toHaveBeenCalled();
+    expect((config.provider as UnknownRecord).outputs_on_startup).toBe("leave");
+  });
+
   it("shows an explicit encoders: false unchecked", () => {
     const config = breadConfig();
     config.devices = [{ id: "dcmt0", type: "dcmt", address: "0x14", encoders: false }];
@@ -265,7 +289,9 @@ describe("SchemaForm — form details (#578)", () => {
   const busInput = () => screen.getByPlaceholderText("/dev/i2c-1 or mock://name");
 
   it("shows no Required line or invalid state on an untouched empty required field", () => {
-    render(SchemaForm, { props: { schema: breadSchema, value: hardwareWithoutBus(), onChanged: vi.fn() } });
+    render(SchemaForm, {
+      props: { schema: breadSchema, value: hardwareWithoutBus(), onChanged: vi.fn() },
+    });
 
     expect(busInput()).toHaveAttribute("aria-required", "true");
     expect(busInput()).not.toHaveAttribute("aria-invalid");
@@ -273,7 +299,9 @@ describe("SchemaForm — form details (#578)", () => {
   });
 
   it("shows the Required line and invalid state once the empty field is left", async () => {
-    render(SchemaForm, { props: { schema: breadSchema, value: hardwareWithoutBus(), onChanged: vi.fn() } });
+    render(SchemaForm, {
+      props: { schema: breadSchema, value: hardwareWithoutBus(), onChanged: vi.fn() },
+    });
 
     await fireEvent.focus(busInput());
     await fireEvent.blur(busInput());

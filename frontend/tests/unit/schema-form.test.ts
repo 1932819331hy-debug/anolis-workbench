@@ -167,7 +167,8 @@ describe("resolveConditionals reasons", () => {
 describe("defaultsFor", () => {
   it("bread: fills hardware defaults, provider name default, no invented bus_path", () => {
     const seeded = defaultsFor(bread);
-    expect(seeded.provider).toEqual({ name: "anolis-provider-bread" });
+    // outputs_on_startup has a schema default from bread 0.10.0 (bread#195).
+    expect(seeded.provider).toEqual({ name: "anolis-provider-bread", outputs_on_startup: "safe" });
     expect(seeded.hardware).toEqual({ query_delay_us: 10000, timeout_ms: 100, retry_count: 2 });
     expect(seeded.discovery).toEqual({ mode: "manual" });
     expect(seeded.devices).toEqual([]);
