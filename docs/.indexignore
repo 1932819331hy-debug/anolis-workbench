@@ -1,0 +1,6 @@
+**/.indexignore
+design/
+testing/
+compatibility-matrices.md
+release-desktop-handoff.md
+release-pypi-handoff.md
