@@ -23,6 +23,7 @@ jobs:
       pull-requests: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
+      docs: ${{ steps.docsfilter.outputs.docs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
@@ -36,6 +37,23 @@ jobs:
               - '!**/*.md'
               - '!**/*.png'
               - '!**/*.svg'
+      # The files the docs-check workflow lints and link-checks, so the docs
+      # gate skips (and ok stays green) on PRs that touch none of them.
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4
+        id: docsfilter
+        with:
+          filters: |
+            docs:
+              - 'docs/**'
+              - '*.md'
+              - '.markdownlint.jsonc'
+              - '.github/workflows/ci.yml'
+
+  docs:
+    name: Docs
+    needs: [changes]
+    if: needs.changes.outputs.docs == 'true'
+    uses: anolishq/.github/.github/workflows/docs-check.yml@0199b6cc7cb73a02d58f75ec8ed763ac40e54dca # v2
 
   frontend:
     name: Frontend (Node / Vite build)
@@ -382,7 +400,7 @@ jobs:
   ok:
     name: ok
     if: always()
-    needs: [changes, frontend, lint, typecheck, test, contract-drift, freeze-smoke, version-sync, desktop]
+    needs: [changes, docs, frontend, lint, typecheck, test, contract-drift, freeze-smoke, version-sync, desktop]
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
