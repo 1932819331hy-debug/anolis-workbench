@@ -10,9 +10,12 @@ import copy
 import hashlib
 import json
 import logging
+import os
 import pathlib
 import re
+import tempfile
 import zipfile
+from contextlib import suppress
 from datetime import datetime, timezone
 from typing import Any
 
@@ -313,9 +316,19 @@ def _checksums_file_bytes(files: dict[str, bytes]) -> bytes:
 def _write_zip_deterministic(*, files: dict[str, bytes], out_path: pathlib.Path) -> None:
     out_path = out_path.resolve()  # ensure canonical path at function entry
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
-
-    with zipfile.ZipFile(tmp_path, mode="w") as archive:
+    fd, tmp = tempfile.mkstemp(dir=str(out_path.parent), prefix=f".{out_path.name}.", suffix=".tmp")
+    tmp_path = pathlib.Path(tmp)
+    handle = None
+    archive = None
+    try:
+        try:
+            handle = os.fdopen(fd, "wb")
+        except BaseException:
+            # fdopen has not transferred ownership to a file object.
+            with suppress(OSError):
+                os.close(fd)
+            raise
+        archive = zipfile.ZipFile(handle, mode="w")
         for rel_path in sorted(files):
             info = zipfile.ZipInfo(filename=rel_path, date_time=_ZIP_EPOCH)
             info.compress_type = zipfile.ZIP_STORED
@@ -323,4 +336,15 @@ def _write_zip_deterministic(*, files: dict[str, bytes], out_path: pathlib.Path)
             info.external_attr = (0o100644 & 0xFFFF) << 16
             archive.writestr(info, files[rel_path])
 
-    tmp_path.replace(out_path)
+        archive.close()
+        handle.close()
+        tmp_path.replace(out_path)
+    except BaseException:
+        # Closing the archive can write again; keep the original failure.
+        for resource in (archive, handle):
+            if resource is not None:
+                with suppress(BaseException):
+                    resource.close()
+        with suppress(OSError):
+            tmp_path.unlink(missing_ok=True)
+        raise

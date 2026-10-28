@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import errno
 import io
 import json
+import os
 import pathlib
 import zipfile
-from typing import Callable
+from typing import Any, BinaryIO, Callable
 
 import pytest
 import requests
@@ -199,6 +201,181 @@ def test_secret_leak_raises_export_error() -> None:
                 "providers/test.yaml": b"connection:\n  token: 'leaked-secret'\n",
             }
         )
+
+
+@pytest.mark.parametrize("existing_output", [False, True])
+@pytest.mark.parametrize("error", [OSError(28, "No space left on device"), KeyboardInterrupt()])
+def test_write_zip_cleans_up_after_mid_write_failure(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch, existing_output: bool, error: BaseException
+) -> None:
+    out = tmp_path / "out.anpkg"
+    if existing_output:
+        out.write_bytes(b"previous package")
+    writestr = zipfile.ZipFile.writestr
+
+    def fail_after_first_entry(archive: zipfile.ZipFile, info: zipfile.ZipInfo, data: bytes) -> None:
+        if info.filename == "b.txt":
+            assert archive.namelist() == ["a.txt"]
+            raise error
+        writestr(archive, info, data)
+
+    monkeypatch.setattr(zipfile.ZipFile, "writestr", fail_after_first_entry)
+    with pytest.raises(type(error)) as raised:
+        exporter._write_zip_deterministic(files={"a.txt": b"first", "b.txt": b"second"}, out_path=out)
+
+    assert raised.value is error
+    if existing_output:
+        assert out.read_bytes() == b"previous package"
+    else:
+        assert not out.exists()
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_write_zip_preserves_another_exports_temporary_file(tmp_path: pathlib.Path) -> None:
+    out = tmp_path / "out.anpkg"
+    other_tmp = tmp_path / "out.anpkg.tmp"
+    other_tmp.write_bytes(b"another export in progress")
+
+    exporter._write_zip_deterministic(files={"a.txt": b"new package"}, out_path=out)
+
+    assert other_tmp.read_bytes() == b"another export in progress"
+    assert list(tmp_path.glob("*.tmp")) == [other_tmp]
+    with zipfile.ZipFile(out) as archive:
+        assert archive.read("a.txt") == b"new package"
+
+
+def test_write_zip_cleans_up_after_replace_failure(tmp_path: pathlib.Path) -> None:
+    out = tmp_path / "out.anpkg"
+    out.mkdir()
+    marker = out / "keep.txt"
+    marker.write_bytes(b"keep")
+
+    with pytest.raises(OSError):
+        exporter._write_zip_deterministic(files={"a.txt": b"new package"}, out_path=out)
+
+    assert marker.read_bytes() == b"keep"
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_write_zip_preserves_original_error_if_cleanup_fails(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "out.anpkg"
+    out.write_bytes(b"previous package")
+    error = OSError(28, "No space left on device")
+    unlink = pathlib.Path.unlink
+
+    def fail_write(archive: zipfile.ZipFile, info: zipfile.ZipInfo, data: bytes) -> None:
+        raise error
+
+    def fail_unlink(path: pathlib.Path, missing_ok: bool = False) -> None:
+        raise PermissionError("temporary file cannot be removed")
+
+    monkeypatch.setattr(zipfile.ZipFile, "writestr", fail_write)
+    monkeypatch.setattr(pathlib.Path, "unlink", fail_unlink)
+    with pytest.raises(OSError) as raised:
+        exporter._write_zip_deterministic(files={"a.txt": b"new package"}, out_path=out)
+
+    assert raised.value is error
+    assert out.read_bytes() == b"previous package"
+    for leftover in tmp_path.glob("*.tmp"):
+        unlink(leftover)
+
+
+def test_write_zip_closes_descriptor_if_fdopen_fails(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    out = tmp_path / "out.anpkg"
+    out.write_bytes(b"previous package")
+    error = MemoryError("file handle allocation failed")
+    allocated_fd: int | None = None
+
+    def fail_fdopen(fd: int, *args: Any, **kwargs: Any) -> BinaryIO:
+        nonlocal allocated_fd
+        allocated_fd = fd
+        raise error
+
+    monkeypatch.setattr(os, "fdopen", fail_fdopen)
+    with pytest.raises(MemoryError) as raised:
+        exporter._write_zip_deterministic(files={"a.txt": b"first"}, out_path=out)
+
+    assert raised.value is error
+    assert out.read_bytes() == b"previous package"
+    assert list(tmp_path.glob("*.tmp")) == []
+    assert allocated_fd is not None
+    try:
+        os.fstat(allocated_fd)
+    except OSError as closed:
+        assert closed.errno == errno.EBADF
+    else:
+        os.close(allocated_fd)  # Do not leak the test's descriptor on regression.
+        pytest.fail("temporary archive descriptor was not closed")
+
+
+def test_write_zip_preserves_write_error_when_finalization_also_fails(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out = tmp_path / "out.anpkg"
+    out.write_bytes(b"previous package")
+    primary = OSError(28, "first write failed")
+    closing = OSError(5, "archive finalization failed")
+    original_open = io.open
+
+    class WriteFault:
+        def __init__(self, raw: BinaryIO) -> None:
+            self.raw = raw
+            self.writes = 0
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self.raw, name)
+
+        def write(self, data: bytes) -> int:
+            self.writes += 1
+            # The first member's header, payload and updated header are real writes.
+            if self.writes == 4:
+                raise primary
+            if self.writes > 4:
+                raise closing
+            return self.raw.write(data)
+
+        def __enter__(self) -> WriteFault:
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            self.raw.__exit__(*args)
+
+    handles: list[WriteFault] = []
+
+    def failing_open(*args: Any, **kwargs: Any) -> WriteFault:
+        handle = WriteFault(original_open(*args, **kwargs))
+        handles.append(handle)
+        return handle
+
+    with monkeypatch.context() as io_patch:
+        io_patch.setattr(io, "open", failing_open)
+        with pytest.raises(OSError) as raised:
+            exporter._write_zip_deterministic(files={"a.txt": b"first", "b.txt": b"second"}, out_path=out)
+
+    assert raised.value is primary
+    assert len(handles) == 1
+    assert handles[0].writes >= 5  # Both the member write and finalization failed.
+    assert handles[0].raw.closed
+    assert out.read_bytes() == b"previous package"
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_write_zip_replaces_output_with_a_deterministic_archive(tmp_path: pathlib.Path) -> None:
+    out = tmp_path / "out.anpkg"
+    other = tmp_path / "other.anpkg"
+    out.write_bytes(b"previous package")
+    exporter._write_zip_deterministic(files={"z.txt": b"last", "a.txt": b"first"}, out_path=out)
+    exporter._write_zip_deterministic(files={"a.txt": b"first", "z.txt": b"last"}, out_path=other)
+
+    assert out.read_bytes() == other.read_bytes()
+    assert list(tmp_path.glob("*.tmp")) == []
+    with zipfile.ZipFile(out) as archive:
+        assert archive.namelist() == ["a.txt", "z.txt"]
+        assert archive.read("a.txt") == b"first"
+        assert archive.read("z.txt") == b"last"
+        assert all(info.date_time == (1980, 1, 1, 0, 0, 0) for info in archive.infolist())
 
 
 # ---------------------------------------------------------------------------
