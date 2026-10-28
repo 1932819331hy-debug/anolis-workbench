@@ -13,6 +13,55 @@ Historical note:
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-27
+
+Upgrade notes:
+
+- **Contracts pin anolis 0.2.0 and anolis-provider-bread 0.10.0** (#679,
+  #686, #687). The sim quickstart template pins runtime 0.2.0. Unlike the
+  last pins, these change schemas the workbench vendors:
+  - the runtime config's `http.cors_allowed_origins` drops `minItems`,
+    since `[]` now means no browser origin (anolishq/anolis#627), and a
+    default or relative `runtime.data_dir` now resolves against the config
+    file (anolishq/anolis#631);
+  - the runtime HTTP contract adds the 403 and 415 refusals
+    (anolishq/anolis#627) and the optional `cause` on an e-stop
+    (anolishq/anolis#633);
+  - bread's config gains `provider.outputs_on_startup`
+    (anolishq/anolis-provider-bread#195).
+
+  Operate reaches the runtime through the workbench's proxy, which sends no
+  `Origin` header, and every POST with a body it sends is
+  `application/json`, so neither refusal applies to it.
+- **A workbench launch names the runtime's data directory** (#681). The
+  launch config sets `runtime.data_dir` to `~/.anolis/anolis-data` when the
+  variant sets none, and resolves a relative one against `~/.anolis`, the
+  directory a launch has always used. The e-stop latch and run journal stay
+  where they were with anolis 0.2.0, which would otherwise keep them in the
+  project, where a re-provision deletes them. The canonical variant, which
+  is what deploys, is unchanged.
+
+### Changed
+
+- **A dropdown whose key is absent names the schema's default** (#688):
+  "— default: Drive outputs safe —" for bread's `outputs_on_startup`, where
+  it read "— select —". It is display only: nothing is written until a
+  value is chosen.
+- **The docs site has an index page**, and working documents stay off it
+  (#680).
+
+### Fixed
+
+- **Overlapping launches, restarts and stops no longer start a second
+  runtime** (#671, #682). Two at once, from a double-submit, two tabs or
+  two clients, could each start a runtime. The workbench tracked only the
+  second, and Stop could not reach the first. A second overlapping launch
+  now gets 409, "A system is already running.". A launch that fails after
+  its runtime started stops that runtime.
+- **A restart renders the launch config again** (#681), as a launch does,
+  instead of reusing the last one. A project that can't render leaves the
+  running runtime running.
+
 ## [0.23.0] - 2026-10-27
 
 Upgrade notes:
