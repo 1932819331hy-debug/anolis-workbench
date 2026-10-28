@@ -117,6 +117,17 @@ export function enumOptions(schema: SchemaNode): EnumOption[] | null {
   return options;
 }
 
+/**
+ * The title of a titled enum's default option, or null: what an absent key
+ * means to the provider, shown in place of "— select —" (bread#195).
+ */
+export function enumDefaultTitle(schema: SchemaNode): string | null {
+  const options = enumOptions(schema);
+  const fallback = schema.default;
+  if (!options || typeof fallback !== "string") return null;
+  return options.find((o) => o.value === fallback)?.title ?? null;
+}
+
 function propertyLabel(schema: SchemaNode, key: string): string {
   return labelFor(key, asRecord(asRecord(schema.properties)?.[key]) ?? {});
 }

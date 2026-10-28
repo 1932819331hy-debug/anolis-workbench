@@ -7,6 +7,7 @@
     asObject,
     authoredProperties,
     descriptionFor,
+    enumDefaultTitle,
     fieldControl,
     isArraySchema,
     isObjectSchema,
@@ -51,6 +52,7 @@
   const isObject = $derived(isObjectSchema(schema));
   const isArray = $derived(isArraySchema(schema));
   const control = $derived(fieldControl(schema));
+  const defaultTitle = $derived(enumDefaultTitle(schema));
   const value = $derived(parent[key]);
   const derivedNote = $derived(derivedFields[key] ?? null);
   const childDerived = $derived(
@@ -181,7 +183,7 @@
       onchange={(e: Event) => commit(selectTarget(e).value || undefined)}
     >
       {#if typeof value !== "string" || value === ""}
-        <option value="">— select —</option>
+        <option value="">{defaultTitle ? `— default: ${defaultTitle} —` : "— select —"}</option>
       {/if}
       {#each control.options as option (option.value)}
         <option value={option.value}>{option.title}</option>

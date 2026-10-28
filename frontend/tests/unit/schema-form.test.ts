@@ -10,6 +10,7 @@ import type { UnknownRecord } from "../../src/lib/contracts";
 import {
   asObject,
   defaultsFor,
+  enumDefaultTitle,
   enumOptions,
   fieldControl,
   isArraySchema,
@@ -400,5 +401,25 @@ describe("pruneForbidden with a stash (#563)", () => {
     const config: UnknownRecord = { mode: "off", rate: 10 };
     pruneForbidden(twoKeys, config, stash);
     expect(config).toEqual({ mode: "off" });
+  });
+});
+
+describe("enumDefaultTitle", () => {
+  const titled = {
+    oneOf: [
+      { const: "on", title: "Switch it on" },
+      { const: "off", title: "Leave it off" },
+    ],
+  };
+
+  it("is the title of the option the default names", () => {
+    expect(enumDefaultTitle({ ...titled, default: "off" })).toBe("Leave it off");
+  });
+
+  it("is null with no default, a default no option names, or a non-string default", () => {
+    expect(enumDefaultTitle(titled)).toBeNull();
+    expect(enumDefaultTitle({ ...titled, default: "maybe" })).toBeNull();
+    expect(enumDefaultTitle({ ...titled, default: 1 })).toBeNull();
+    expect(enumDefaultTitle({ type: "string", default: "off" })).toBeNull();
   });
 });
